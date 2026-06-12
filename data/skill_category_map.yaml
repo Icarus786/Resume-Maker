@@ -462,6 +462,17 @@ hard_skills:
   "strategic reporting": "BI & Reporting"
   "data literacy": "Data Analysis & Statistics"
   "self-service capabilities": "Business Analysis"
+  "azure-based data platforms": "Data Engineering & Platforms"
+  "row-level security (rls)": "Business Analysis"
+  "incremental refresh": "BI & Reporting"
+  "performance optimization strategies": "Business Analysis"
+  "ai-assisted analytics tools": "Machine Learning & Forecasting"
+  "databricks medallion architecture": "Data Engineering & Platforms"
+  "data products": "Business Analysis"
+  "analytics solutions": "BI & Reporting"
+  "data security": "Data Engineering & Platforms"
+  "consistency": "Data Analysis & Statistics"
+  "datasets": "Data Analysis & Statistics"
 soft_skills:
   # --- Stakeholder & Business Partnership ---
   "communication": "Stakeholder & Business Partnership"

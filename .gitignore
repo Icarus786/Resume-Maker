@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated output (per-job PDFs/LaTeX artifacts)
+output/
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+
+# Runtime/dev artifacts
+uvicorn.pid
+uvicorn_err.log
+uvicorn_out.log
+tailor_payload.json
+
+# Editor/OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Env
+.env

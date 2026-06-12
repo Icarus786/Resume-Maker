@@ -1,7 +1,11 @@
 \documentclass[10.5pt,letterpaper]{article}
 
 % --- Packages ---------------------------------------------------------------
+<% if compact %>
+\usepackage[margin=0.55in]{geometry}
+<% else %>
 \usepackage[margin=0.65in]{geometry}
+<% endif %>
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{tgpagella}
@@ -15,7 +19,11 @@
 % --- Paragraph layout: no indent, small fixed gap (no stretch, so spacing is
 %     identical everywhere) ----------------------------------------------------
 \setlength{\parindent}{0pt}
+<% if compact %>
+\setlength{\parskip}{2pt}
+<% else %>
 \setlength{\parskip}{4pt}
+<% endif %>
 
 % --- Colors ------------------------------------------------------------------
 \definecolor{accent}{RGB}{14, 84, 78}
@@ -32,10 +40,18 @@
   {\large\bfseries\color{accent}}
   {}{0em}{}
   [\vspace{2pt}{\color{accent}\titlerule[0.8pt]}]
+<% if compact %>
+\titlespacing*{\section}{0pt}{4pt}{2pt}
+<% else %>
 \titlespacing*{\section}{0pt}{7pt}{3pt}
+<% endif %>
 
 % --- Tighter lists for bullets ------------------------------------------------
+<% if compact %>
+\setlist[itemize]{leftmargin=1.15em, itemsep=0pt, topsep=1pt, parsep=0pt}
+<% else %>
 \setlist[itemize]{leftmargin=1.15em, itemsep=1pt, topsep=2pt, parsep=0pt}
+<% endif %>
 
 % --- No page numbers -----------------------------------------------------------
 \pagestyle{empty}
@@ -77,11 +93,19 @@
 
 % --- Header --------------------------------------------------------------------
 \begin{center}
+<% if compact %>
+  {\LARGE \bfseries \color{accent} <<contact.name>>}\\[0.2em]
+<% else %>
   {\Huge \bfseries \color{accent} <<contact.name>>}\\[0.3em]
+<% endif %>
   {\normalsize <<title_line>>}\\[0.1em]
   {\small <<contact.location>><% if contact.phone %> | <<contact.phone>><% endif %><% if contact.email %> | \href{mailto:<<contact.email>>}{\textcolor{black}{<<contact.email>>}}<% endif %><% if contact.linkedin %> | \href{https://<<contact.linkedin>>}{\textcolor{black}{<<contact.linkedin>>}}<% endif %><% if contact.github %> | \href{https://<<contact.github>>}{\textcolor{black}{<<contact.github>>}}<% endif %><% if contact.website %> | \href{https://<<contact.website>>}{\textcolor{black}{<<contact.website>>}}<% endif %>}
 \end{center}
+<% if compact %>
+\vspace{-14pt}
+<% else %>
 \vspace{-12pt}
+<% endif %>
 
 <% if summary %>
 \needspace{4\baselineskip}

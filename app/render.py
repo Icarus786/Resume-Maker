@@ -65,6 +65,26 @@ class LatexCompileError(RuntimeError):
     """Raised when pdflatex fails to produce a PDF."""
 
 
+# Resumes longer than this are recompiled in compact mode (tighter spacing).
+MAX_RESUME_PAGES = 2
+
+_PAGE_COUNT_RE = re.compile(r"\((\d+) pages?,")
+
+
+def _page_count(log_path: Path) -> int | None:
+    """Parse the page count pdflatex reports in its log, if present.
+
+    pdflatex hard-wraps its log at ~79 columns, which can split the
+    "Output written on ... (N pages, ...)" line across two lines (often
+    mid-path), so strip newlines before matching.
+    """
+    if not log_path.exists():
+        return None
+    log_text = log_path.read_text(encoding="utf-8", errors="replace").replace("\n", "")
+    match = _PAGE_COUNT_RE.search(log_text)
+    return int(match.group(1)) if match else None
+
+
 def _compile_tex(tex_source: str, job_name: str, out_dir: Path) -> Path:
     """Write `tex_source` to `out_dir/job_name.tex` and compile it to PDF.
 
@@ -117,15 +137,26 @@ def render_resume(resume_dict: dict, job_name: str = "resume", out_dir: Path | N
 
     `resume_dict` should match the shape of `app.models.Resume` (e.g. from
     `resume_to_dict()`), optionally with a tailored `title_line` / bullets.
+
+    If the rendered resume exceeds `MAX_RESUME_PAGES`, it is automatically
+    recompiled with tighter ("compact") spacing to try to fit within the
+    limit. The resume content itself is never altered.
     """
     ensure_dirs()
     out_dir = out_dir or OUTPUT_DIR
 
     template = _env.get_template("resume_template.tex")
     safe_data = _escape_latex(resume_dict)
-    tex_source = template.render(**safe_data)
 
-    return _compile_tex(tex_source, job_name, out_dir)
+    tex_source = template.render(**safe_data, compact=False)
+    pdf_path = _compile_tex(tex_source, job_name, out_dir)
+
+    pages = _page_count(out_dir / f"{job_name}.log")
+    if pages is not None and pages > MAX_RESUME_PAGES:
+        tex_source = template.render(**safe_data, compact=True)
+        pdf_path = _compile_tex(tex_source, job_name, out_dir)
+
+    return pdf_path
 
 
 def render_cover_letter(context: dict, job_name: str = "cover_letter", out_dir: Path | None = None) -> Path:
