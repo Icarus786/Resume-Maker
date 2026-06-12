@@ -1,0 +1,192 @@
+# Master resume — content only. Layout lives in templates/resume_template.tex.
+# Edit this file with your real, truthful information. The LLM will only
+# reword/reorder this content per job description; it will never invent facts.
+
+contact:
+  name: Shrey Modi
+  email: shreymodi0711@gmail.com
+  phone: "+1 (905) 783-9118"
+  location: "Toronto, Canada (Open to Relocation)"
+  linkedin: linkedin.com/in/shreymodi786
+
+# Tagline shown under your name. Tailorable per job (LLM may reword/reorder
+# the parts, but must reflect skills actually present in this resume).
+title_line: "Data Analyst | Power BI Expert | Business & Operational Analytics"
+
+summary: >
+  Data Analyst and Power BI specialist with 2+ years of professional analytics
+  experience across operations, finance, commercial reporting, and project
+  controls. Advanced in Power BI, DAX, Power Query (M), SQL, Python, data
+  modeling, forecasting, and automated KPI reporting. Experienced in
+  connecting IT, Finance, and Operations stakeholders, translating complex
+  operational and financial data into clear management insights, reliable
+  semantic models, budget variance analysis, and proactive decision support.
+  Strong background building predictive tools for high-volume operational
+  environments and executive-ready reporting ecosystems.
+
+core_competencies:
+  - category: "Stakeholder & Business Partnership"
+    keywords:
+      - Stakeholder Engagement & Management
+      - Requirements Gathering & Documentation
+      - Cross-Functional Collaboration (IT-Finance-Operations)
+      - Workshop Facilitation & Interviews
+      - Communication & Relationship Building
+  - category: "Insight & Decision Support"
+    keywords:
+      - Data Storytelling & Insight Generation
+      - Translating Complex Data into Business Recommendations
+      - Executive Presentations & Reporting
+      - Decision Support & Trade-off Analysis
+  - category: "Ways of Working"
+    keywords:
+      - Analytical & Problem-Solving Mindset
+      - Agile & Iterative Delivery
+      - Continuous Process Improvement
+      - Ownership & Outcome-Oriented Approach
+      - Attention to Detail & Data Quality Focus
+
+skills:
+  - category: "Business Analysis"
+    keywords:
+      - Requirements Gathering
+      - Functional Documentation
+      - Process Mapping & Gap Analysis
+      - User Stories & Use Cases
+      - UAT Planning & Execution
+      - Process Improvement
+      - KPI Definition & Governance
+  - category: "BI & Reporting"
+    keywords:
+      - Power BI
+      - DAX
+      - Power Query (M)
+      - Semantic / Data Modeling
+      - Dashboard Design
+      - Report Automation
+      - Excel (Advanced, VBA)
+      - Executive Reporting
+  - category: "Data Analysis & Statistics"
+    keywords:
+      - SQL (SQL Server)
+      - Python (Pandas, NumPy)
+      - Exploratory Data Analysis
+      - Trend & Variance Analysis
+      - A/B-style Comparative Analysis
+      - Scenario Modeling
+      - Budget & EAC Forecasting
+  - category: "Machine Learning & Forecasting"
+    keywords:
+      - Predictive Modeling
+      - Supervised Learning (Regression, Classification)
+      - Time-Series & Demand Forecasting
+      - Model Evaluation & Validation
+      - Streamlit (ML App Deployment)
+  - category: "Data Engineering & Platforms"
+    keywords:
+      - ETL Pipelines
+      - Data Cleansing & Validation
+      - Master Data Management
+      - SAP Business One (ERP)
+      - SharePoint
+      - Power Apps
+      - Azure (Fabric, DP-900)
+      - AWS (S3, Lambda, EC2)
+      - Git/GitHub
+      - Docker
+
+experience:
+  - company: Brock Canada
+    title: Business Analyst
+    location: Nisku, AB
+    start: Feb 2025
+    end: May 2026
+    bullets:
+      - "Developed an executive Power BI reporting ecosystem used by 50+ senior leaders, reducing manual reporting effort by 10% and enabling real-time visibility into project KPIs, financial performance, labour productivity, and operational trends."
+      - "Designed and maintained Power BI data models integrating SAP B1, labour, cost, contract, productivity, and progress data, improving reporting accuracy by 30% and establishing a single source of truth for business decision-making."
+      - "Built a predictive project analytics application that forecasted lump-sum project overruns and identified early risk indicators, improving forecast accuracy and supporting proactive cost-control decisions."
+      - "Performed budget variance analysis, EAC forecasting, burn-rate monitoring, and productivity analysis (CPI/PF), enabling project teams to identify performance risks earlier and improve forecast reliability."
+      - "Automated SQL-based reporting workflows and SAP B1 data extraction processes, reducing reporting turnaround time by 15% and saving 5-10 hours of manual effort per week."
+      - "Developed Power Apps solutions for timesheet entry, labour tracking, and progress reporting, reducing data-entry errors by 20% and improving field-to-office reporting efficiency."
+      - "Collaborated with Finance, Operations, and Project Management stakeholders to gather requirements, validate data quality, and deliver analytics solutions that improved reporting adoption and decision-making effectiveness."
+      - "Received the Most Valuable Team Player Award for delivering high-impact analytics and automation initiatives that improved operational efficiency, reporting capabilities, and cross-functional collaboration."
+  - company: Red Wireless
+    title: Data Analyst
+    location: Saskatoon, SK
+    start: Nov 2024
+    end: Dec 2024
+    bullets:
+       - "Built and automated interactive KPI dashboards for marketing and operations teams, reducing manual reporting effort by 50% and improving visibility into customer behavior, campaign performance, and commercial trends."
+       - "Performed data cleansing, transformation, and validation using SQL and Python, improving data accuracy by 25% and ensuring reliable datasets for stakeholder reporting and analysis."
+       - "Delivered analytical insights and performance reports that supported marketing campaign optimization, contributing to a 10% improvement in customer retention and stronger customer engagement."
+       - "Integrated third-party APIs with Google Sheets using JavaScript, eliminating manual data extraction, reducing reporting turnaround time by 80%, and enabling near real-time access to business metrics."
+  - company: Vosyn
+    title: MLOps Engineer Intern
+    location: Etobicoke, ON
+    start: May 2024
+    end: Oct 2024
+    bullets:
+      - "Enhanced CI/CD pipelines using GitHub Actions and Docker, reducing build times by 40% and deployment failures by 30%, improving reliability of data and machine learning workflows."
+      - "Provisioned AWS infrastructure including Lambda, EC2, S3, ECR, and ECS to support scalable data-processing and machine learning workloads with a 99.9% uptime target."
+      - "Optimized Python-based data-processing pipelines, increasing throughput by 50% and reducing latency by 25%, enabling faster analytics and model development."
+
+projects:
+  - name: Mental Health Apprehension Analytics
+    description: "AI and Data Analyst Project - Toronto Public Data"
+    start: Aug 2024
+    end: Aug 2024
+    tech: []
+    bullets:
+      - "Built an end-to-end ETL and analytics pipeline on AWS/HDFS to ingest, clean, process, and analyze Toronto Police public datasets at scale, reducing manual preprocessing effort by ~60% and enabling scalable data exploration."
+      - "Developed a forecasting model to predict apprehension locations and behavior patterns, improving predictive insight accuracy and delivering results via a Streamlit web application for stakeholder interpretation and decision-making support."
+      - "Designed and implemented interactive visual analytics dashboards to surface spatial and temporal crime trends, improving data accessibility for non-technical stakeholders."
+
+  - name: JupyterHub Sandbox Administration System
+    description: "Cloud/Data Platform Project - Georgian College"
+    start: Aug 2023
+    end: Aug 2023
+    tech: []
+    bullets:
+      - "Deployed and administered a multi-user JupyterHub environment enabling scheduled CPU/GPU access for analytics and data science workloads, improving resource utilization efficiency."
+      - "Configured secure, role-based access and environment isolation for users, enhancing system stability and reducing environment setup time for data science workflows."
+
+education:
+  - institution: Georgian College, Barrie, ON
+    degree: Post-Graduate Certificate in Big Data Analytics
+    start: Jan 2024
+    end: Aug 2024
+    details:
+      - "4.00 GPA"
+      - "Dean's List"
+  - institution: Georgian College, Barrie, ON
+    degree: Post-Graduate Certificate in Artificial Intelligence
+    start: Jan 2023
+    end: Aug 2023
+    details:
+      - "4.00 GPA"
+      - "Dean's List"
+  - institution: KSV University, Gandhinagar, Gujarat, India
+    degree: Bachelor of Computer Engineering
+    start: Jun 2018
+    end: Jun 2022
+    details:
+      - "3.7 GPA"
+
+certifications:
+  - "Microsoft Azure Data Fundamentals (DP-900)"
+  - "Azure Machine Learning"
+  - "AWS Academy Machine Learning for NLP"
+  - "AWS Academy Cloud Architecting"
+  - "Advanced Power BI: DAX Language, Formulas, and Calculations"
+  - "Stanford Supervised Machine Learning"
+
+awards:
+  - "Most Valuable Team Player Award - Brock Canada"
+  - "Dean's List - Big Data Analytics"
+  - "Dean's List - Artificial Intelligence"
+
+hobbies:
+  - "Filmmaking"
+  - "Video Games"
+  - "Hiking"
+  - "Photography"

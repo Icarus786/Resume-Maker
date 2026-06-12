@@ -1,0 +1,119 @@
+\documentclass[10.5pt,letterpaper]{article}
+
+% --- Packages ---------------------------------------------------------------
+\usepackage[margin=0.65in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{tgpagella}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tabularx}
+
+% --- Paragraph layout: no indent, small fixed gap (no stretch, so spacing is
+%     identical everywhere) ----------------------------------------------------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+% --- Colors ------------------------------------------------------------------
+\definecolor{accent}{RGB}{14, 84, 78}
+
+% --- Hyperlink styling ---------------------------------------------------------
+\hypersetup{
+    colorlinks=true,
+    urlcolor=accent,
+    linkcolor=accent,
+}
+
+% --- Section headers: colored caps with a rule underneath --------------------
+\titleformat{\section}
+  {\large\bfseries\color{accent}}
+  {}{0em}{}
+  [\vspace{2pt}{\color{accent}\titlerule[0.8pt]}]
+\titlespacing*{\section}{0pt}{9pt}{3pt}
+
+% --- Tighter lists for bullets ------------------------------------------------
+\setlist[itemize]{leftmargin=1.15em, itemsep=1pt, topsep=2pt, parsep=0pt}
+
+% --- No page numbers -----------------------------------------------------------
+\pagestyle{empty}
+
+% --- Avoid overfull lines with long bullet text -------------------------------
+\sloppy
+
+% --- Helper command for an experience/education header row -------------------
+% #1 = left bold text, #2 = right-aligned text (e.g. dates)
+\newcommand{\resumeRow}[2]{%
+  \noindent\begin{tabularx}{\linewidth}{@{}X r@{}}
+    \textbf{#1} & #2 \\
+  \end{tabularx}%
+}
+
+\begin{document}
+
+% --- Header --------------------------------------------------------------------
+\begin{center}
+  {\Huge \bfseries \color{accent} Shrey Modi}\\[0.3em]
+  {\normalsize Microsoft Office Business Specialist | Power BI Expert | Business Intelligence}\\[0.1em]
+  {\small
+    Toronto, Canada (Open to Relocation)
+ | +1 (905) 783-9118 | \href{mailto:shreymodi0711@gmail.com}{\textcolor{black}{shreymodi0711@gmail.com}} | \href{https://linkedin.com/in/shreymodi786}{\textcolor{black}{linkedin.com/in/shreymodi786}}  }
+\end{center}
+\vspace{-12pt}
+
+\section{Professional Summary}
+\noindent Results-driven business specialist with a strong background in Microsoft Office tools and expertise in Power BI, data modeling, forecasting, and analytics. Proven ability to analyze complex operational and financial data, create actionable insights, and develop predictive models for high-volume environments. Skilled in connecting IT, Finance, and Operations stakeholders through effective communication and collaboration.
+
+\section{Core Competencies}
+\noindent
+\textbf{Stakeholder \& Consulting:} Stakeholder Engagement, Cross-Functional Collaboration, Requirements Gathering \& Documentation, Communication \& Relationship Building\\\textbf{Insight \& Reporting:} Insight Generation \& Storytelling, Translating Complex Data into Business-Friendly Insights, Executive Presentations \& Reporting\\\textbf{Ways of Working:} Analytical \& Problem-Solving Mindset, Proactive \& Outcome-Oriented Approach, Continuous Process Improvement
+\section{Core Skills}
+\noindent
+\textbf{Power BI \& Data Modeling:} Power BI, DAX, Power Query (M), semantic models, calculated measures, dashboard design, KPI governance, report automation\\\textbf{Forecasting \& Analytics:} Predictive analytics, visitor-flow/demand-style forecasting, trend analysis, scenario modeling, budget support, variance analysis, AI Development\\\textbf{Data Engineering \& Quality:} SQL Server, SAP B1, Python (Pandas, NumPy), ETL pipelines, data cleansing, data validation, master data management, Business Process Analysis, Data Organization, Training Data\\\textbf{Business Partnership:} IT-Finance-Operations collaboration, requirements gathering, stakeholder communication, UAT, process improvement, executive reporting\\\textbf{Tools \& Cloud:} Power Apps, SharePoint, Excel VBA, Dynamics 365, Azure Fabric, AWS, Git/GitHub, Docker, Jupyter, VS Code
+\section{Professional Experience}
+\resumeRow{Business Analyst | Brock Canada - Nisku, AB}{Feb 2025 -- May 2026}
+\begin{itemize}
+  \item Developed an executive Power BI reporting ecosystem used by 50+ senior leaders to monitor project KPIs, burn rate, labour productivity, financial performance, and operational trends across multiple company entities.
+  \item Designed and maintained Power BI data models combining labour, cost, productivity, contract, progress, and SAP B1 data, improving the reliability of operational and financial reporting.
+  \item Built a predictive lump-sum project tracking web application to forecast overrun risk, identify early warning signals, and help project managers make proactive cost and schedule decisions.
+  \item Translated operational performance into financial impact through budget variance analysis, EAC forecasting, CPI/PF productivity metrics, burn-rate reporting, and scenario-based project controls insights.
+  \item Automated SQL-based reporting workflows using SAP B1 data, reducing manual reporting effort by 5-10 hours per week while improving data consistency and auditability.
+  \item Created Power Apps solutions for timesheet entry, labour tracking, and progress tracking, reducing manual data-entry errors and improving field-to-office reporting accuracy by 20\%.
+  \item Partnered with project managers, Finance, and Operations teams to clarify requirements, validate data quality, reconcile costs, and deliver clear recommendations to management.
+  \item Received the Most Valuable Team Player Award for collaboration, ownership, initiative, and measurable business impact through analytics and automation.
+\end{itemize}
+\resumeRow{Data Analyst | Red Wireless - Saskatoon, SK}{Nov 2024 -- Dec 2024}
+\begin{itemize}
+  \item Built and automated interactive KPI dashboards for marketing and operations teams, improving visibility into customer behavior, campaign performance, and commercial trends.
+  \item Performed data cleansing, transformation, and validation using SQL and Python to ensure accurate customer, campaign, and operational datasets for stakeholder reporting.
+  \item Delivered analytical reports that influenced marketing campaign optimization and contributed to a 10\% improvement in customer retention.
+  \item Integrated third-party APIs with Google Sheets using JavaScript, eliminating manual extraction and accelerating analytical turnaround for recurring reporting.
+\end{itemize}
+\resumeRow{MLOps Engineer Intern | Vosyn - Etobicoke, ON}{May 2024 -- Oct 2024}
+\begin{itemize}
+  \item Worked in Agile/Scrum cycles to improve CI/CD pipelines, automating Docker builds through GitHub Actions and reducing build times by 40\% and deployment errors by 30\%.
+  \item Provisioned AWS infrastructure including Lambda, EC2, S3, ECR, and ECS to support scalable data-processing workloads with a 99.9\% uptime target.
+  \item Optimized Python data-processing scripts, achieving 50\% faster throughput and 25\% lower latency for analytical workloads.
+\end{itemize}
+
+\section{Projects}
+\resumeRow{Mental Health Apprehension Analytics | AI and Data Analyst Project - Toronto Public Data (Aug 2024)}{}
+\begin{itemize}
+  \item Built an end-to-end ETL and analytics pipeline on AWS/HDFS to ingest, clean, process, and analyze Toronto Police public datasets at scale.
+  \item Developed a forecasting model to predict apprehension locations and visualized insights in a Streamlit web application for stakeholder presentation.
+\end{itemize}
+\resumeRow{JupyterHub Sandbox Administration System | Cloud/Data Platform Project - Georgian College (Aug 2023)}{}
+\begin{itemize}
+  \item Deployed and administered a multi-user JupyterHub environment, enabling scheduled access to CPU/GPU resources for analytics and data science workloads.
+\end{itemize}
+
+\section{Education}
+\resumeRow{Post-Graduate Certificate in Big Data Analytics}{Jan 2024 -- Aug 2024}
+{\small Georgian College, Barrie, ON | 4.00 GPA | Dean's List}\\[2pt]\resumeRow{Post-Graduate Certificate in Artificial Intelligence}{Jan 2023 -- Aug 2023}
+{\small Georgian College, Barrie, ON | 4.00 GPA | Dean's List}\\[2pt]\resumeRow{Bachelor of Computer Engineering}{Jun 2018 -- Jun 2022}
+{\small KSV University, Gandhinagar, Gujarat, India | 3.7 GPA}
+\section{Certifications \& Recognition}
+\noindent\textbf{Certifications:} Microsoft Azure Data Fundamentals (DP-900); Azure Machine Learning; AWS Academy Machine Learning for NLP; AWS Academy Cloud Architecting; Advanced Power BI: DAX Language, Formulas, and Calculations; Stanford Supervised Machine Learning.\\\noindent\textbf{Awards:} Most Valuable Team Player Award - Brock Canada; Dean's List - Big Data Analytics; Dean's List - Artificial Intelligence.
+
+\end{document}

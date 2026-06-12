@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resume Maker</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Resume Maker</h1>
+    <p class="subtitle">Tailor your resume &amp; cover letter to a job description, locally.</p>
+  </header>
+
+  <main>
+    <!-- Step 1: Job description input -->
+    <section class="card" id="step-jd">
+      <h2>1. Job Description</h2>
+      <div class="row">
+        <div class="field">
+          <label for="company">Company (optional)</label>
+          <input type="text" id="company" placeholder="Acme Corp" />
+        </div>
+        <div class="field">
+          <label for="role">Role title (optional)</label>
+          <input type="text" id="role" placeholder="Data Analyst" />
+        </div>
+      </div>
+      <label for="jd-text">Paste job description</label>
+      <textarea id="jd-text" rows="10" placeholder="Paste the full job description here..."></textarea>
+      <div class="actions">
+        <button id="btn-analyze">Analyze</button>
+        <span class="status" id="status-analyze"></span>
+      </div>
+    </section>
+
+    <!-- Step 2: Analysis results -->
+    <section class="card hidden" id="step-analysis">
+      <h2>2. Detected Keywords</h2>
+      <div id="analysis-output"></div>
+      <div class="actions">
+        <button id="btn-tailor">Tailor Resume</button>
+        <span class="status" id="status-tailor"></span>
+      </div>
+    </section>
+
+    <!-- Step 3: Tailoring diff + keyword approval -->
+    <section class="card hidden" id="step-tailor">
+      <h2>3. Review Tailored Resume</h2>
+
+      <div id="honesty-warnings" class="hidden"></div>
+
+      <div id="title-line-diff" class="diff-block"></div>
+
+      <div id="summary-diff" class="diff-block"></div>
+
+      <h3>Core Skills <span class="hint">(technical skills; includes any added to match the job description)</span></h3>
+      <div id="skills-diff"></div>
+
+      <h3>Core Competencies <span class="hint">(soft skills; JD soft skills are standardized and added here)</span></h3>
+      <div id="competencies-diff"></div>
+
+      <div class="actions">
+        <button id="btn-download-resume">Download Resume PDF</button>
+        <button id="btn-preview-cover-letter">Preview Cover Letter</button>
+        <span class="status" id="status-render"></span>
+      </div>
+    </section>
+
+    <!-- Step 4: Cover letter preview -->
+    <section class="card hidden" id="step-cover-letter">
+      <h2>4. Cover Letter</h2>
+      <div id="cover-letter-preview" class="cover-letter-preview"></div>
+      <div class="actions">
+        <button id="btn-copy-cover-letter">Copy to Clipboard</button>
+        <button id="btn-download-cover-letter">Download Cover Letter PDF</button>
+        <span class="status" id="status-cover-letter"></span>
+      </div>
+    </section>
+
+    <section class="card hidden" id="step-error">
+      <h2>Error</h2>
+      <pre id="error-output"></pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

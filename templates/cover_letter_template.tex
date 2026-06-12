@@ -1,0 +1,60 @@
+\documentclass[11pt,letterpaper]{article}
+
+% --- Packages ---------------------------------------------------------------
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{tgpagella}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{parskip}
+
+% --- Colors ------------------------------------------------------------------
+\definecolor{accent}{RGB}{31, 73, 125}
+
+\hypersetup{
+    colorlinks=true,
+    urlcolor=accent,
+    linkcolor=accent,
+}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.8em}
+\setlength{\emergencystretch}{2em}
+
+\begin{document}
+
+% --- Header: name + contact info ---------------------------------------------
+\begin{center}
+  {\Large \bfseries \color{accent} <<contact.name>>}\\[0.2em]
+  {\small <<contact.location>><% if contact.phone %> | <<contact.phone>><% endif %><% if contact.email %> | \href{mailto:<<contact.email>>}{\textcolor{black}{<<contact.email>>}}<% endif %><% if contact.linkedin %> | \href{https://<<contact.linkedin>>}{\textcolor{black}{<<contact.linkedin>>}}<% endif %>}
+\end{center}
+
+\vspace{1em}
+
+<<date>>
+
+\vspace{0.5em}
+
+<% if hiring_manager %><<hiring_manager>>\\
+<% endif %>
+<% if company %><<company>>\\
+<% endif %>
+<% if hiring_manager or company %>
+\vspace{0.5em}
+<% endif %>
+
+<% if role %>\textbf{Re: Application for <<role>><% if company %> at <<company>><% endif %>}
+
+<% endif %>
+Dear Hiring Manager,
+
+<% for para in paragraphs %>
+<<para>>
+
+<% endfor %>
+Sincerely,\\
+<<contact.name>>
+
+\end{document}

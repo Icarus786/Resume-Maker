@@ -1,0 +1,165 @@
+\documentclass[10.5pt,letterpaper]{article}
+
+% --- Packages ---------------------------------------------------------------
+\usepackage[margin=0.65in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{tgpagella}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{needspace}
+
+% --- Paragraph layout: no indent, small fixed gap (no stretch, so spacing is
+%     identical everywhere) ----------------------------------------------------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+% --- Colors ------------------------------------------------------------------
+\definecolor{accent}{RGB}{14, 84, 78}
+
+% --- Hyperlink styling ---------------------------------------------------------
+\hypersetup{
+    colorlinks=true,
+    urlcolor=accent,
+    linkcolor=accent,
+}
+
+% --- Section headers: colored caps with a rule underneath --------------------
+\titleformat{\section}
+  {\large\bfseries\color{accent}}
+  {}{0em}{}
+  [\vspace{2pt}{\color{accent}\titlerule[0.8pt]}]
+\titlespacing*{\section}{0pt}{7pt}{3pt}
+
+% --- Tighter lists for bullets ------------------------------------------------
+\setlist[itemize]{leftmargin=1.15em, itemsep=1pt, topsep=2pt, parsep=0pt}
+
+% --- No page numbers -----------------------------------------------------------
+\pagestyle{empty}
+
+% --- Avoid overfull lines with long bullet text, while keeping justified text
+%     tidy (small emergency stretch instead of full \sloppy, which can leave
+%     large, unprofessional gaps between words) --------------------------------
+\setlength{\emergencystretch}{2em}
+
+% --- Helper command for an experience/education header row -------------------
+% #1 = left bold text, #2 = right-aligned text (e.g. dates)
+\newcommand{\resumeRow}[2]{%
+  \noindent\begin{tabularx}{\linewidth}{@{}X r@{}}
+    \textbf{#1} & #2 \\
+  \end{tabularx}%
+}
+
+% --- Two-column bulleted list (for Certifications, Awards, Interests) --------
+% #1 = list of \item entries for the left column, #2 = same for the right column
+\newenvironment{twocolitems}{%
+  \begin{itemize}[leftmargin=1.15em, itemsep=1pt, topsep=2pt, parsep=0pt]
+}{%
+  \end{itemize}
+}
+\newcommand{\twocollist}[2]{%
+  \noindent\begin{minipage}[t]{0.5\linewidth}
+    \begin{twocolitems}
+    #1
+    \end{twocolitems}
+  \end{minipage}%
+  \begin{minipage}[t]{0.5\linewidth}
+    \begin{twocolitems}
+    #2
+    \end{twocolitems}
+  \end{minipage}%
+}
+
+\begin{document}
+
+% --- Header --------------------------------------------------------------------
+\begin{center}
+  {\Huge \bfseries \color{accent} <<contact.name>>}\\[0.3em]
+  {\normalsize <<title_line>>}\\[0.1em]
+  {\small <<contact.location>><% if contact.phone %> | <<contact.phone>><% endif %><% if contact.email %> | \href{mailto:<<contact.email>>}{\textcolor{black}{<<contact.email>>}}<% endif %><% if contact.linkedin %> | \href{https://<<contact.linkedin>>}{\textcolor{black}{<<contact.linkedin>>}}<% endif %><% if contact.github %> | \href{https://<<contact.github>>}{\textcolor{black}{<<contact.github>>}}<% endif %><% if contact.website %> | \href{https://<<contact.website>>}{\textcolor{black}{<<contact.website>>}}<% endif %>}
+\end{center}
+\vspace{-12pt}
+
+<% if summary %>
+\needspace{4\baselineskip}
+\section{Professional Summary}
+\noindent <<summary>>
+<% endif %>
+
+<% if core_competencies %>
+\needspace{4\baselineskip}
+\section{Core Competencies}
+\noindent
+<% for group in core_competencies %>\textbf{<<group.category>>:} <<group.keywords|join(", ")>><% if not loop.last %>\\<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if skills %>
+\needspace{4\baselineskip}
+\section{Core Skills}
+\noindent
+<% for group in skills %>\textbf{<<group.category>>:} <<group.keywords|join(", ")>><% if not loop.last %>\\<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if experience %>
+\needspace{6\baselineskip}
+\section{Professional Experience}
+<% for job in experience %>
+\needspace{4\baselineskip}
+\resumeRow{<<job.title>> | <<job.company>><% if job.location %> - <<job.location>><% endif %>}{<<job.start>> -- <<job.end>>}
+\begin{itemize}
+<% for bullet in job.bullets %>  \item <<bullet>>
+<% endfor %>\end{itemize}
+<% endfor %>
+<% endif %>
+
+<% if projects %>
+\needspace{6\baselineskip}
+\section{Projects}
+<% for proj in projects %>
+\needspace{4\baselineskip}
+\resumeRow{<<proj.name>><% if proj.description %> | <<proj.description>><% endif %>}{<% if proj.start %><<proj.start>><% if proj.end and proj.end != proj.start %> -- <<proj.end>><% endif %><% endif %>}
+<% if proj.bullets %>\begin{itemize}
+<% for bullet in proj.bullets %>  \item <<bullet>>
+<% endfor %>\end{itemize}
+<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if education %>
+\needspace{6\baselineskip}
+\section{Education}
+<% for edu in education %>
+\resumeRow{<<edu.degree>>}{<% if edu.start %><<edu.start>> -- <% endif %><<edu.end>>}
+{\small <<edu.institution>><% if edu.details %> | <<edu.details|join(" | ")>><% endif %>}<% if not loop.last %>\\[2pt]<% endif %>
+<% endfor %>
+<% endif %>
+
+<% if certifications or awards %>
+\needspace{4\baselineskip}
+\section{Certifications \& Recognition}
+<% if certifications %>
+\textbf{Certifications}\\[2pt]
+<% set half = (certifications|length / 2)|round(0, "ceil")|int %>
+\twocollist{%
+<% for cert in certifications[:half] %>  \item <<cert>>
+<% endfor %>}{%
+<% for cert in certifications[half:] %>  \item <<cert>>
+<% endfor %>}
+<% endif %>
+<% if awards %>
+\textbf{Awards}\\[2pt]
+<% set half = (awards|length / 2)|round(0, "ceil")|int %>
+\twocollist{%
+<% for award in awards[:half] %>  \item <<award>>
+<% endfor %>}{%
+<% for award in awards[half:] %>  \item <<award>>
+<% endfor %>}
+<% endif %>
+<% endif %>
+
+\end{document}
