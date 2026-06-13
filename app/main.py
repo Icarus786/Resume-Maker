@@ -23,6 +23,7 @@ from app.config import MASTER_RESUME_PATH, OUTPUT_DIR, STATIC_DIR, ensure_dirs
 from app.honesty_guard import check_resume
 from app.llm import (
     OllamaError,
+    add_skills_to_resume,
     analyze_job,
     generate_cover_letter,
     tailor_resume,
@@ -46,6 +47,14 @@ class AnalyzeRequest(BaseModel):
 
 class TailorRequest(BaseModel):
     jd_analysis: dict
+    category_overrides: dict[str, str] = Field(default_factory=dict)
+    company: str = ""
+    role: str = ""
+
+
+class AddSkillsRequest(BaseModel):
+    skills_section: list[dict] = Field(default_factory=list)
+    skill_names: list[str] = Field(default_factory=list)
 
 
 class RenderResumeRequest(BaseModel):
@@ -59,6 +68,9 @@ class CoverLetterRequest(BaseModel):
     jd_analysis: dict
     company: str = ""
     role: str = ""
+    # The tailored resume (reworded bullets) to ground the letter in. Falls
+    # back to the master resume when omitted.
+    resume: dict = Field(default_factory=dict)
 
 
 class RenderCoverLetterRequest(BaseModel):
@@ -66,6 +78,7 @@ class RenderCoverLetterRequest(BaseModel):
     company: str = ""
     role: str = ""
     hiring_manager: str = ""
+    subject: str = ""  # full "Re:" line; overrides the default when provided
     paragraphs: list[str] = Field(default_factory=list)
 
 
@@ -139,14 +152,36 @@ def api_analyze(req: AnalyzeRequest) -> dict:
 def api_tailor(req: TailorRequest) -> dict:
     master = _get_master_resume_dict()
     try:
-        result = tailor_resume(master, req.jd_analysis)
+        result = tailor_resume(master, req.jd_analysis, category_overrides=req.category_overrides)
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=f"Tailoring failed validation: {exc}") from exc
     except OllamaError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    if "needs_categorization" in result:
+        return result
+
     result["honesty_warnings"] = check_resume(master, result["tailored_resume"])
+    # NOTE: the cover letter is intentionally NOT generated here. The frontend
+    # shows the tailored resume immediately, then requests /api/cover-letter
+    # separately so the (slow) cover-letter LLM call runs in the background
+    # without making the user wait to see their resume.
     return result
+
+
+@app.post("/api/add-skills")
+def api_add_skills(req: AddSkillsRequest) -> dict:
+    """Insert user-confirmed skills into the tailored resume's skills section.
+
+    Used when the user opts into crucial JD skills the resume lacked (the
+    suggested-skills checklist). Returns the updated skills section. Fast: no
+    reword/bullet/gap/cover-letter LLM calls - only routing/auto-categorize.
+    """
+    try:
+        skills = add_skills_to_resume(req.skills_section, req.skill_names)
+    except OllamaError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"skills": skills}
 
 
 @app.post("/api/render/resume")
@@ -169,13 +204,17 @@ def api_render_resume(req: RenderResumeRequest):
 
 @app.post("/api/cover-letter")
 def api_cover_letter(req: CoverLetterRequest) -> dict:
-    """Generate cover letter text for preview (no PDF)."""
-    master = _get_master_resume_dict()
+    """Generate cover letter text for preview (no PDF).
+
+    Grounds the letter in the tailored `resume` from the request when present
+    (so it reflects the reworded bullets), falling back to the master resume.
+    """
+    source = req.resume if req.resume else _get_master_resume_dict()
     company = _resolve_company(req.company, req.jd_analysis)
 
     try:
         cover_letter = generate_cover_letter(
-            master, req.jd_analysis, company=company, role=req.role
+            source, req.jd_analysis, company=company, role=req.role
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -212,6 +251,7 @@ def api_render_cover_letter(req: RenderCoverLetterRequest):
         "company": company,
         "role": req.role,
         "hiring_manager": req.hiring_manager,
+        "subject": req.subject.strip(),
         "paragraphs": paragraphs,
     }
 

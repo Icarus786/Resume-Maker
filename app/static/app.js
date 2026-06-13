@@ -19,26 +19,46 @@ const els = {
 
   btnTailor: document.getElementById("btn-tailor"),
   statusTailor: document.getElementById("status-tailor"),
-  stepTailor: document.getElementById("step-tailor"),
+
+  stepGap: document.getElementById("step-gap"),
+  gapReport: document.getElementById("gap-report"),
+
+  stepReview: document.getElementById("step-review"),
+  stepPlaceholder: document.getElementById("step-placeholder"),
+  reviewTabs: document.getElementById("review-tabs"),
+  tabResume: document.getElementById("tab-resume"),
+  tabCoverLetter: document.getElementById("tab-cover-letter"),
+
+  resumeSubtabs: document.getElementById("resume-subtabs"),
 
   titleLineDiff: document.getElementById("title-line-diff"),
   summaryDiff: document.getElementById("summary-diff"),
   skillsDiff: document.getElementById("skills-diff"),
+  suggestedSkills: document.getElementById("suggested-skills"),
   competenciesDiff: document.getElementById("competencies-diff"),
+  experienceDiff: document.getElementById("experience-diff"),
+  projectsDiff: document.getElementById("projects-diff"),
+  certificationsList: document.getElementById("certifications-list"),
+  awardsList: document.getElementById("awards-list"),
   honestyWarnings: document.getElementById("honesty-warnings"),
 
   btnDownloadResume: document.getElementById("btn-download-resume"),
-  btnPreviewCoverLetter: document.getElementById("btn-preview-cover-letter"),
   statusRender: document.getElementById("status-render"),
 
-  stepCoverLetter: document.getElementById("step-cover-letter"),
-  coverLetterPreview: document.getElementById("cover-letter-preview"),
+  clSubject: document.getElementById("cl-subject"),
+  clBody: document.getElementById("cl-body"),
+  btnRegenerateCoverLetter: document.getElementById("btn-regenerate-cover-letter"),
   btnCopyCoverLetter: document.getElementById("btn-copy-cover-letter"),
   btnDownloadCoverLetter: document.getElementById("btn-download-cover-letter"),
   statusCoverLetter: document.getElementById("status-cover-letter"),
 
   stepError: document.getElementById("step-error"),
   errorOutput: document.getElementById("error-output"),
+
+  categorizeModal: document.getElementById("categorize-modal"),
+  categorizeList: document.getElementById("categorize-list"),
+  btnCategorizeSubmit: document.getElementById("btn-categorize-submit"),
+  statusCategorize: document.getElementById("status-categorize"),
 };
 
 function showError(message) {
@@ -208,6 +228,147 @@ function renderHonestyWarnings(warnings) {
   els.honestyWarnings.classList.remove("hidden");
 }
 
+// Renders the gap/match report: how well the candidate's real background
+// supports each JD requirement (strong/partial/missing) plus actionable
+// suggestions. Hidden if there's nothing to show.
+function renderGapReport(report) {
+  if (!report || (!report.requirements?.length && !report.suggestions?.length)) {
+    els.stepGap.classList.add("hidden");
+    els.gapReport.innerHTML = "";
+    return;
+  }
+
+  const order = { strong: 0, partial: 1, missing: 2 };
+  const reqs = [...(report.requirements || [])].sort(
+    (a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3)
+  );
+
+  const counts = { strong: 0, partial: 0, missing: 0 };
+  for (const r of reqs) if (r.status in counts) counts[r.status]++;
+
+  const rows = reqs
+    .map((r) => {
+      const evidence = r.evidence
+        ? `<span class="gap-evidence">${escapeHtml(r.evidence)}</span>`
+        : "";
+      return (
+        `<li class="gap-item gap-${escapeHtml(r.status)}">` +
+        `<span class="gap-status">${escapeHtml(r.status)}</span>` +
+        `<span class="gap-req">${escapeHtml(r.requirement)}</span>${evidence}</li>`
+      );
+    })
+    .join("");
+
+  const suggestions = (report.suggestions || []).length
+    ? `<div class="gap-suggestions"><h4>Suggestions</h4><ul>${report.suggestions
+        .map((s) => `<li>${escapeHtml(s)}</li>`)
+        .join("")}</ul></div>`
+    : "";
+
+  els.gapReport.innerHTML = `
+    <p class="hint" style="margin-top:0;">How well your real experience fits this job.</p>
+    <p class="gap-summary">
+      <span class="gap-pill gap-strong">${counts.strong} strong</span>
+      <span class="gap-pill gap-partial">${counts.partial} partial</span>
+      <span class="gap-pill gap-missing">${counts.missing} missing</span>
+    </p>
+    <ul class="gap-list">${rows}</ul>
+    ${suggestions}
+  `;
+  els.stepGap.classList.remove("hidden");
+}
+
+// Renders the "crucial skills you may have" opt-in checklist. `skills` is the
+// list of crucial JD skills the resume lacked (gap_report.suggested_skills).
+// The user ticks the ones they actually have; "Add selected" routes them into
+// the tailored resume's skills section via /api/add-skills and re-renders.
+function renderSuggestedSkills(skills) {
+  els.suggestedSkills.innerHTML = "";
+  if (!skills || !skills.length) {
+    els.suggestedSkills.classList.add("hidden");
+    return;
+  }
+
+  const box = document.createElement("div");
+  box.className = "suggest-box";
+  box.innerHTML =
+    `<h4>Crucial skills this job wants</h4>` +
+    `<p class="hint" style="margin:0 0 0.6rem;">The job centers on these, but they're not on your resume. ` +
+    `Tick any you genuinely have and we'll add them to your Skills.</p>`;
+
+  const list = document.createElement("div");
+  list.className = "suggest-list";
+  for (const skill of skills) {
+    const id = `suggest-${skill.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+    const label = document.createElement("label");
+    label.className = "suggest-item";
+    label.htmlFor = id;
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.id = id;
+    cb.value = skill;
+    const span = document.createElement("span");
+    span.textContent = skill;
+    label.appendChild(cb);
+    label.appendChild(span);
+    list.appendChild(label);
+  }
+  box.appendChild(list);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const addBtn = document.createElement("button");
+  addBtn.textContent = "Add selected to Skills";
+  const status = document.createElement("span");
+  status.className = "status";
+  actions.appendChild(addBtn);
+  actions.appendChild(status);
+  box.appendChild(actions);
+  els.suggestedSkills.appendChild(box);
+  els.suggestedSkills.classList.remove("hidden");
+
+  addBtn.addEventListener("click", async () => {
+    const chosen = [...list.querySelectorAll("input:checked")].map((c) => c.value);
+    if (!chosen.length) {
+      setStatus(status, "Tick at least one skill first.", "error");
+      return;
+    }
+    addBtn.disabled = true;
+    setStatus(status, "Adding…", "");
+    try {
+      const resp = await postJSON("/api/add-skills", {
+        skills_section: state.tailored.tailored_resume.skills,
+        skill_names: chosen,
+      });
+      // Update the live resume + re-render the skills diff.
+      state.tailored.tailored_resume.skills = resp.skills;
+      rebuildSkillsDiff();
+      // Drop the just-added skills from the suggestion list.
+      const remaining = skills.filter((s) => !chosen.includes(s));
+      renderSuggestedSkills(remaining);
+    } catch (err) {
+      setStatus(status, "Failed.", "error");
+      showError(err.message);
+    } finally {
+      addBtn.disabled = false;
+    }
+  });
+}
+
+// Rebuilds the skills diff from the current tailored resume after skills are
+// added. Each group's "original" is its pre-existing keywords; newly added
+// ones show as tailored-only additions.
+function rebuildSkillsDiff() {
+  const groups = state.tailored.tailored_resume.skills || [];
+  const diffGroups = groups.map((g) => ({
+    category: g.category,
+    original: [...g.keywords],
+    tailored: [...g.keywords],
+    low_relevance: false,
+  }));
+  renderSkillSectionDiff(els.skillsDiff, diffGroups, "skills", state.tailored.tailored_resume.skills);
+}
+
 // Renders one skills/competencies section. `groups` is the diff list (for
 // display) and `targetGroups` is the live array inside
 // state.tailored.tailored_resume that gets sent to the PDF renderer - both
@@ -220,7 +381,7 @@ function renderSkillSectionDiff(container, groups, label, targetGroups) {
   if (!targetGroups) return;
   groups.forEach((group, gi) => {
     const wrap = document.createElement("div");
-    wrap.className = "diff-group";
+    wrap.className = "diff-group" + (group.low_relevance ? " low-relevance" : "");
 
     const headerRow = document.createElement("div");
     headerRow.className = "category-row";
@@ -229,6 +390,13 @@ function renderSkillSectionDiff(container, groups, label, targetGroups) {
     categoryName.className = "category";
     categoryName.textContent = group.category;
     headerRow.appendChild(categoryName);
+
+    if (group.low_relevance) {
+      const badge = document.createElement("span");
+      badge.className = "low-relevance-badge";
+      badge.textContent = "Low relevance for this job - consider removing";
+      headerRow.appendChild(badge);
+    }
 
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
@@ -251,10 +419,48 @@ function renderSkillSectionDiff(container, groups, label, targetGroups) {
   });
 }
 
+// Renders an experience/projects bullet diff. `entries` is the diff list
+// ({label, sublabel, bullets:[{original, tailored}]}) and `targetEntries` is
+// the live array inside state.tailored.tailored_resume (experience or
+// projects) so edits to the tailored bullet text are written back and reach
+// the PDF. Entry index `ei` and bullet index `bi` line up between the two.
+function renderBulletSectionDiff(container, entries, targetEntries) {
+  container.innerHTML = "";
+  if (!entries || !entries.length) return;
+  if (!targetEntries) return;
+
+  entries.forEach((entry, ei) => {
+    if (!entry.bullets || !entry.bullets.length) return;
+    const wrap = document.createElement("div");
+    wrap.className = "diff-group";
+
+    const heading = document.createElement("div");
+    heading.className = "bullet-entry-head";
+    const head = entry.label || "";
+    const sub = entry.sublabel ? ` — ${entry.sublabel}` : "";
+    heading.textContent = head + sub;
+    wrap.appendChild(heading);
+
+    entry.bullets.forEach((bullet, bi) => {
+      renderDiffPair(wrap, "bullet", bullet.original, bullet.tailored, (val) => {
+        if (targetEntries[ei] && Array.isArray(targetEntries[ei].bullets)) {
+          targetEntries[ei].bullets[bi] = val;
+        }
+      });
+    });
+
+    container.appendChild(wrap);
+  });
+}
+
 function renderTailoringDiff(result) {
-  const { diff, honesty_warnings } = result;
+  const { diff, honesty_warnings, gap_report } = result;
 
   renderHonestyWarnings(honesty_warnings);
+  renderGapReport(gap_report);
+  renderSuggestedSkills(gap_report?.suggested_skills);
+
+  els.stepPlaceholder.classList.add("hidden");
 
   const tailoredResume = state.tailored.tailored_resume;
 
@@ -279,8 +485,149 @@ function renderTailoringDiff(result) {
     tailoredResume.core_competencies
   );
 
-  els.stepTailor.classList.remove("hidden");
-  els.stepTailor.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Experience / project bullets (reworded for the role; facts preserved).
+  renderBulletSectionDiff(els.experienceDiff, diff.experience || [], tailoredResume.experience);
+  renderBulletSectionDiff(els.projectsDiff, diff.projects || [], tailoredResume.projects);
+
+  // Certifications & awards (static facts, read-only).
+  renderExtras(tailoredResume);
+
+  els.stepReview.classList.remove("hidden");
+  switchTab("resume");
+  switchSubtab("overview");
+  els.stepReview.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // The resume is now visible. Generate the cover letter in the background so
+  // the user can start reviewing/editing the resume without waiting.
+  generateCoverLetterInBackground();
+}
+
+// --- Tabs --------------------------------------------------------------------
+
+function switchTab(name) {
+  els.tabResume.classList.toggle("hidden", name !== "resume");
+  els.tabCoverLetter.classList.toggle("hidden", name !== "cover-letter");
+  for (const tab of els.reviewTabs.querySelectorAll(".tab")) {
+    tab.classList.toggle("active", tab.dataset.tab === name);
+  }
+}
+
+// Sub-tabs within the Resume tab (Title & Summary / Skills / Experience / ...).
+function switchSubtab(name) {
+  for (const panel of els.tabResume.querySelectorAll(".subtab-panel")) {
+    panel.classList.toggle("hidden", panel.id !== `sub-${name}`);
+  }
+  for (const tab of els.resumeSubtabs.querySelectorAll(".subtab")) {
+    tab.classList.toggle("active", tab.dataset.subtab === name);
+  }
+}
+
+// Renders certifications and awards (read-only static facts from the resume).
+function renderExtras(resume) {
+  function fill(container, items, emptyMsg) {
+    container.innerHTML = "";
+    if (!items || !items.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = emptyMsg;
+      container.appendChild(p);
+      return;
+    }
+    const ul = document.createElement("ul");
+    ul.className = "extras-list";
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.textContent = item;
+      ul.appendChild(li);
+    }
+    container.appendChild(ul);
+  }
+  fill(els.certificationsList, resume.certifications, "No certifications listed.");
+  fill(els.awardsList, resume.awards, "No awards listed.");
+}
+
+// --- Cover letter ------------------------------------------------------------
+
+// Sets the cover-letter editor to a "loading" state while it generates in the
+// background.
+function setCoverLetterLoading() {
+  els.clBody.value = "Writing your cover letter in the background…";
+  els.clBody.disabled = true;
+  setStatus(els.statusCoverLetter, "Generating in the background…", "");
+}
+
+// Renders the cover letter into the subject line + single body textarea. The
+// body is one editable block (paragraphs joined by blank lines). state.coverLetter
+// holds {company, role} for context; subject/body are read from the inputs at
+// copy/download time so edits are always respected.
+function renderCoverLetter(coverLetter) {
+  els.clBody.disabled = false;
+  if (!coverLetter || !coverLetter.paragraphs || !coverLetter.paragraphs.length) {
+    state.coverLetter = null;
+    els.clBody.value = "";
+    els.clBody.placeholder =
+      "Cover letter couldn't be generated (the local model may have been busy). Use Regenerate to try again.";
+    setStatus(els.statusCoverLetter, "Not generated.", "error");
+    return;
+  }
+
+  const company = coverLetter.company || "";
+  const role = coverLetter.role || "";
+  state.coverLetter = { company, role };
+
+  // Default Re: line (editable).
+  els.clSubject.value =
+    role ? `Re: Application for ${role}${company ? ` at ${company}` : ""}` : "";
+
+  // Single body block: paragraphs separated by a blank line.
+  els.clBody.value = coverLetter.paragraphs.join("\n\n");
+  setStatus(els.statusCoverLetter, "Ready — edit freely.", "success");
+}
+
+// Split the single body block back into paragraphs (on blank lines) for the
+// PDF renderer, which expects a list.
+function coverLetterParagraphs() {
+  return els.clBody.value
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+// Assemble the full cover-letter plain text (with subject/salutation/signature)
+// for copying to the clipboard.
+function coverLetterText() {
+  const contact = state.tailored?.tailored_resume?.contact;
+  const lines = [];
+  if (contact?.name) lines.push(contact.name);
+  if (els.clSubject.value.trim()) lines.push(els.clSubject.value.trim());
+  lines.push("");
+  lines.push("Dear Hiring Manager,");
+  lines.push("");
+  for (const para of coverLetterParagraphs()) {
+    lines.push(para);
+    lines.push("");
+  }
+  lines.push("Sincerely,");
+  if (contact?.name) lines.push(contact.name);
+  return lines.join("\n");
+}
+
+// Generate the cover letter in the background, grounded in the tailored resume.
+async function generateCoverLetterInBackground() {
+  if (!state.jdAnalysis || !state.tailored) return;
+  setCoverLetterLoading();
+  try {
+    const coverLetter = await postJSON("/api/cover-letter", {
+      jd_analysis: state.jdAnalysis,
+      company: els.company.value.trim(),
+      role: els.role.value.trim(),
+      resume: state.tailored.tailored_resume,
+    });
+    renderCoverLetter(coverLetter);
+  } catch (err) {
+    renderCoverLetter(null);
+    setStatus(els.statusCoverLetter, "Failed — use Regenerate to retry.", "error");
+  }
 }
 
 // --- Event handlers --------------------------------------------------------
@@ -310,7 +657,10 @@ els.btnAnalyze.addEventListener("click", async () => {
     }
 
     els.stepAnalysis.classList.remove("hidden");
-    els.stepAnalysis.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Surface the right pane with a hint until the user tailors.
+    if (els.stepReview.classList.contains("hidden")) {
+      els.stepPlaceholder.classList.remove("hidden");
+    }
     setStatus(els.statusAnalyze, "Done.", "success");
   } catch (err) {
     setStatus(els.statusAnalyze, "Failed.", "error");
@@ -320,15 +670,80 @@ els.btnAnalyze.addEventListener("click", async () => {
   }
 });
 
+// Shows the categorization modal for `needs_categorization` entries and
+// resolves with a map of {lowercase keyword -> chosen category}.
+function promptForCategories(needsCategorization) {
+  return new Promise((resolve) => {
+    els.categorizeList.innerHTML = "";
+    setStatus(els.statusCategorize, "", "");
+
+    for (const entry of needsCategorization) {
+      const row = document.createElement("div");
+      row.className = "categorize-row";
+
+      const label = document.createElement("span");
+      label.className = "keyword";
+      label.textContent = entry.keyword;
+      row.appendChild(label);
+
+      const select = document.createElement("select");
+      select.dataset.keyword = entry.keyword.toLowerCase();
+      for (const category of entry.categories) {
+        const option = document.createElement("option");
+        option.value = category;
+        option.textContent = category;
+        select.appendChild(option);
+      }
+      const extraOption = document.createElement("option");
+      extraOption.value = entry.extra_category;
+      extraOption.textContent = `${entry.extra_category} (catch-all)`;
+      extraOption.selected = true;
+      select.appendChild(extraOption);
+
+      row.appendChild(select);
+      els.categorizeList.appendChild(row);
+    }
+
+    els.categorizeModal.classList.remove("hidden");
+
+    const onSubmit = () => {
+      const overrides = {};
+      for (const select of els.categorizeList.querySelectorAll("select")) {
+        overrides[select.dataset.keyword] = select.value;
+      }
+      els.categorizeModal.classList.add("hidden");
+      els.btnCategorizeSubmit.removeEventListener("click", onSubmit);
+      resolve(overrides);
+    };
+    els.btnCategorizeSubmit.addEventListener("click", onSubmit);
+  });
+}
+
 els.btnTailor.addEventListener("click", async () => {
   clearError();
   if (!state.jdAnalysis) return;
 
   els.btnTailor.disabled = true;
-  setStatus(els.statusTailor, "Tailoring resume with local LLM... this can take a minute or two.", "");
+  setStatus(els.statusTailor, "Tailoring resume & cover letter with local LLM... this can take a minute or two.", "");
 
   try {
-    const result = await postJSON("/api/tailor", { jd_analysis: state.jdAnalysis });
+    let categoryOverrides = {};
+    let result;
+    while (true) {
+      result = await postJSON("/api/tailor", {
+        jd_analysis: state.jdAnalysis,
+        category_overrides: categoryOverrides,
+        company: els.company.value.trim(),
+        role: els.role.value.trim(),
+      });
+      if (!result.needs_categorization) break;
+
+      setStatus(els.statusTailor, "Waiting for keyword categorization...", "");
+      const chosen = await promptForCategories(result.needs_categorization);
+      categoryOverrides = { ...categoryOverrides, ...chosen };
+      setStatus(els.statusTailor, "Tailoring resume & cover letter with local LLM... this can take a minute or two.", "");
+    }
+
     state.tailored = result;
     renderTailoringDiff(result);
     setStatus(els.statusTailor, "Done.", "success");
@@ -367,58 +782,49 @@ els.btnDownloadResume.addEventListener("click", async () => {
   }
 });
 
-function renderCoverLetterPreview(coverLetter) {
-  const { paragraphs, company, role } = coverLetter;
-  const contact = state.tailored?.tailored_resume?.contact;
+// Tab switching in the right pane.
+els.reviewTabs.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (tab) switchTab(tab.dataset.tab);
+});
 
-  const lines = [];
-  if (contact?.name) lines.push(contact.name);
-  if (role) {
-    lines.push(`Re: Application for ${role}${company ? ` at ${company}` : ""}`);
-  }
-  lines.push("");
-  lines.push("Dear Hiring Manager,");
-  lines.push("");
-  for (const para of paragraphs) {
-    lines.push(para);
-    lines.push("");
-  }
-  lines.push("Sincerely,");
-  if (contact?.name) lines.push(contact.name);
+// Sub-tab switching within the Resume tab.
+els.resumeSubtabs.addEventListener("click", (e) => {
+  const tab = e.target.closest(".subtab");
+  if (tab) switchSubtab(tab.dataset.subtab);
+});
 
-  els.coverLetterPreview.textContent = lines.join("\n");
-  els.stepCoverLetter.classList.remove("hidden");
-  els.stepCoverLetter.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-els.btnPreviewCoverLetter.addEventListener("click", async () => {
+els.btnRegenerateCoverLetter.addEventListener("click", async () => {
   clearError();
-  if (!state.jdAnalysis) return;
+  if (!state.jdAnalysis || !state.tailored) return;
 
-  els.btnPreviewCoverLetter.disabled = true;
-  setStatus(els.statusRender, "Generating cover letter with local LLM...", "");
+  els.btnRegenerateCoverLetter.disabled = true;
+  setStatus(els.statusCoverLetter, "Regenerating cover letter with local LLM...", "");
 
   try {
     const coverLetter = await postJSON("/api/cover-letter", {
       jd_analysis: state.jdAnalysis,
       company: els.company.value.trim(),
       role: els.role.value.trim(),
+      resume: state.tailored.tailored_resume,
     });
-    state.coverLetter = coverLetter;
-    renderCoverLetterPreview(coverLetter);
-    setStatus(els.statusRender, "Done.", "success");
+    renderCoverLetter(coverLetter);
   } catch (err) {
-    setStatus(els.statusRender, "Failed.", "error");
+    setStatus(els.statusCoverLetter, "Failed.", "error");
     showError(err.message);
   } finally {
-    els.btnPreviewCoverLetter.disabled = false;
+    els.btnRegenerateCoverLetter.disabled = false;
   }
 });
 
 els.btnCopyCoverLetter.addEventListener("click", async () => {
   clearError();
+  if (!coverLetterParagraphs().length) {
+    setStatus(els.statusCoverLetter, "Nothing to copy yet.", "error");
+    return;
+  }
   try {
-    await navigator.clipboard.writeText(els.coverLetterPreview.textContent);
+    await navigator.clipboard.writeText(coverLetterText());
     setStatus(els.statusCoverLetter, "Copied to clipboard.", "success");
   } catch (err) {
     setStatus(els.statusCoverLetter, "Failed to copy.", "error");
@@ -429,6 +835,12 @@ els.btnCopyCoverLetter.addEventListener("click", async () => {
 els.btnDownloadCoverLetter.addEventListener("click", async () => {
   clearError();
   if (!state.jdAnalysis) return;
+
+  const paragraphs = coverLetterParagraphs();
+  if (!paragraphs.length) {
+    setStatus(els.statusCoverLetter, "Nothing to download yet.", "error");
+    return;
+  }
 
   els.btnDownloadCoverLetter.disabled = true;
   setStatus(els.statusCoverLetter, "Rendering cover letter PDF...", "");
@@ -441,7 +853,8 @@ els.btnDownloadCoverLetter.addEventListener("click", async () => {
         company: els.company.value.trim(),
         role: els.role.value.trim(),
         hiring_manager: "",
-        paragraphs: state.coverLetter?.paragraphs || [],
+        subject: els.clSubject.value.trim(),
+        paragraphs,
       },
       "cover_letter.pdf"
     );

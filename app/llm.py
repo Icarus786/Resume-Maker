@@ -20,6 +20,7 @@ from app.config import (
     OLLAMA_TIMEOUT_SECONDS,
     SKILL_CATEGORY_MAP_PATH,
 )
+from app.honesty_guard import filter_bullet_rewrites
 
 
 class OllamaError(RuntimeError):
@@ -577,62 +578,464 @@ shape:
 """
 
 
-# --- Stage 3: classify JD keywords with no entry in skill_category_map.yaml ----
+# --- Stage 0: flag existing categories that don't fit this job ----------------
 #
-# Used only as a fallback for keywords _merge_jd_keywords can't place via the
-# deterministic map. The response is a flat string -> string object, which is
-# a much easier shape for Llama than nested resume JSON.
-_CLASSIFY_SYSTEM_PROMPT = """\
-You are categorizing resume skill/competency keywords into an existing set of \
-resume section categories.
+# The candidate's master resume may contain whole skill/competency categories
+# that are real and truthful but not relevant to a given job (e.g. a "Machine
+# Learning & Forecasting" category when applying to a Business Analyst role).
+# `_merge_jd_keywords` never removes original content, so without this step
+# such categories would always appear. Here we ask the LLM which EXISTING
+# categories are a poor fit for the target job, so `tailor_resume` can move
+# them to the end of the section and flag them in the diff as "suggested for
+# removal" - the user can still keep them with one click.
+_RELEVANCE_SYSTEM_PROMPT = """\
+You are helping a candidate tailor their resume to a specific job by deciding \
+which of their EXISTING resume section categories are a poor fit for the job.
 
-You will be given a list of `categories` (the only valid category names) and \
-a list of `keywords` to file into those categories.
+You will be given:
+- `job`: a structured analysis of the target job description (job title, \
+hard/soft keywords, must-haves).
+- `skill_categories`: the category names in the candidate's "Skills" section.
+- `competency_categories`: the category names in the candidate's "Core \
+Competencies" section.
 
-For each keyword, choose the SINGLE existing category from `categories` that \
-is the best semantic fit. If and only if NO category in `categories` is a \
-reasonable fit for a keyword, use the exact string "__OTHER__" instead.
+For each category name in `skill_categories` and `competency_categories`, \
+decide if it is LOW_RELEVANCE for this specific job - meaning the category as \
+a whole (its general subject area) has little to do with the job's \
+responsibilities or required skills, and including it would look unfocused \
+on a tailored resume (e.g. a "Machine Learning & Forecasting" category when \
+the job is a Business Analyst role with no ML/forecasting requirements).
 
-Respond with ONLY a JSON object (no markdown, no commentary) mapping each \
-input keyword to its chosen category name (or "__OTHER__"):
+Only mark a category LOW_RELEVANCE if it is clearly off-topic for the job. If \
+a category is plausibly relevant, generally useful, or related to the job's \
+domain even loosely, mark it RELEVANT. Most categories should be RELEVANT - \
+be conservative.
+
+Respond with ONLY a JSON object (no markdown, no commentary) with this exact \
+shape:
 {
-  "<keyword>": "<category name from `categories`, or \\"__OTHER__\\">",
-  ...
+  "skill_categories": {"<category name>": "RELEVANT" or "LOW_RELEVANCE", ...},
+  "competency_categories": {"<category name>": "RELEVANT" or "LOW_RELEVANCE", ...}
 }
 
-Every keyword from the input `keywords` list MUST appear as a key in your \
-response, exactly as given.
+Every category name from both input lists MUST appear as a key in the \
+matching output object, exactly as given.
 """
 
 
-def _classify_unmapped(keywords: list[str], categories: list[str]) -> dict[str, str]:
-    """Ask the LLM to file `keywords` into one of `categories` (or
-    "__OTHER__" if none fit).
+def _classify_category_relevance(
+    jd_analysis: dict,
+    skill_categories: list[str],
+    competency_categories: list[str],
+) -> tuple[set[str], set[str]]:
+    """Ask the LLM which existing resume categories are a poor fit for this job.
 
-    Returns {keyword: category_or_"__OTHER__"}. Any keyword the model fails
-    to return, or maps to a category not in `categories`, is mapped to
-    "__OTHER__" so callers can fall back to a catch-all bucket without
-    dropping the keyword. On any Ollama error, all keywords map to
-    "__OTHER__" (best-effort - tailoring should still succeed offline).
+    Returns (low_relevance_skill_categories, low_relevance_competency_categories)
+    - sets of category names (exactly as given in the inputs) the model marked
+    "LOW_RELEVANCE". On any Ollama error or malformed response, returns two
+    empty sets (fail open - tailoring proceeds with all categories treated as
+    relevant).
+    """
+    if not skill_categories and not competency_categories:
+        return set(), set()
+
+    user_prompt = json.dumps(
+        {
+            "job": jd_analysis,
+            "skill_categories": skill_categories,
+            "competency_categories": competency_categories,
+        },
+        indent=2,
+    )
+    try:
+        result = chat_json(_RELEVANCE_SYSTEM_PROMPT, user_prompt, temperature=0.0)
+    except OllamaError:
+        return set(), set()
+
+    if not isinstance(result, dict):
+        return set(), set()
+
+    def _low_relevance(field: str, valid: list[str]) -> set[str]:
+        verdicts = result.get(field)
+        if not isinstance(verdicts, dict):
+            return set()
+        valid_set = set(valid)
+        return {
+            name
+            for name, verdict in verdicts.items()
+            if name in valid_set and verdict == "LOW_RELEVANCE"
+        }
+
+    return (
+        _low_relevance("skill_categories", skill_categories),
+        _low_relevance("competency_categories", competency_categories),
+    )
+
+
+# --- Stage 1b: rewrite experience / project bullets for the target role -------
+#
+# The biggest lever for actually adapting a resume to a different role (e.g. a
+# Business-Analyst master resume targeting a Data Scientist posting) is the
+# bullet text itself. Previously bullets were copied verbatim. Here we let the
+# LLM REFRAME each bullet toward the target job and weave in JD terminology -
+# but ONLY where it already describes what the bullet says. Every employer,
+# date, metric, tool, and outcome must be preserved; nothing may be invented.
+# A deterministic guard (`honesty_guard.filter_bullet_rewrites`) runs AFTER
+# this and reverts any rewrite that introduces a number or tool/proper noun
+# that wasn't in the original bullet, so fabrication can't slip through even if
+# the model ignores the instructions.
+_BULLET_REWRITE_SYSTEM_PROMPT = """\
+You are an expert resume writer optimizing a candidate's EXISTING experience \
+and project bullets for a specific target job and for ATS (Applicant Tracking \
+System) keyword matching.
+
+You will be given:
+- `target_job`: a structured analysis of the job (title, hard/soft keywords, \
+must-haves).
+- `bullets`: a flat list of the candidate's real experience/project bullets, \
+each with an `id` and `text`.
+
+Rewrite each bullet so it reads as strongly as possible FOR THIS TARGET JOB:
+- Lead with the most job-relevant angle of what the bullet describes.
+- Use stronger action verbs and clearer outcome framing.
+- Weave in terminology from `target_job` ONLY where it genuinely and \
+accurately describes what the bullet already says (e.g. if a bullet describes \
+building predictive models and the job wants "machine learning", you may use \
+"machine learning"; if the bullet has nothing to do with a JD keyword, do NOT \
+force that keyword in).
+
+ABSOLUTE RULES - violating these is worse than a weak bullet:
+- NEVER invent or change facts. Keep every number, percentage, dollar amount, \
+date, employer, team, product, and tool EXACTLY as in the original. Do not add \
+a metric, tool, technology, or accomplishment that is not in the original \
+bullet.
+- NEVER add a named tool/technology/skill the original bullet does not \
+mention, even if the job asks for it. Reframing is allowed; fabricating is not.
+- If a bullet genuinely cannot be improved without inventing something, return \
+it UNCHANGED.
+- Keep each rewritten bullet roughly the same length as the original (one \
+concise sentence/line).
+
+Respond with ONLY a JSON object (no markdown, no commentary) with this exact \
+shape:
+{
+  "bullets": [{"id": <same id as input>, "text": "<rewritten bullet>"}, ...]
+}
+
+Every bullet id from the input MUST appear exactly once in your response.
+"""
+
+
+def _rewrite_experience_bullets(master: dict, jd_analysis: dict) -> dict[str, str]:
+    """Rewrite experience/project bullets toward the target job via the LLM.
+
+    Returns {bullet_id -> rewritten text} for ids the model returned with a
+    non-empty string. Bullet ids are "exp:<job_index>:<bullet_index>" and
+    "proj:<project_index>:<bullet_index>". Callers MUST run the rewrites
+    through `honesty_guard.filter_bullet_rewrites` before using them, so any
+    rewrite that introduces a new number/tool is reverted to the original.
+
+    On any Ollama error or malformed response returns {} (fail open - bullets
+    stay verbatim).
+    """
+    indexed: list[dict] = []
+    for ji, job in enumerate(master.get("experience", []) or []):
+        for bi, bullet in enumerate(job.get("bullets", []) or []):
+            if str(bullet).strip():
+                indexed.append({"id": f"exp:{ji}:{bi}", "text": str(bullet)})
+    for pi, proj in enumerate(master.get("projects", []) or []):
+        for bi, bullet in enumerate(proj.get("bullets", []) or []):
+            if str(bullet).strip():
+                indexed.append({"id": f"proj:{pi}:{bi}", "text": str(bullet)})
+
+    if not indexed:
+        return {}
+
+    payload = {"target_job": jd_analysis, "bullets": indexed}
+    try:
+        result = chat_json(
+            _BULLET_REWRITE_SYSTEM_PROMPT, json.dumps(payload, indent=2), temperature=0.2
+        )
+    except OllamaError:
+        return {}
+
+    if not isinstance(result, dict):
+        return {}
+
+    rewrites: dict[str, str] = {}
+    for item in result.get("bullets") or []:
+        if not isinstance(item, dict):
+            continue
+        bid = str(item.get("id", "")).strip()
+        text = str(item.get("text", "") or "").strip()
+        if bid and text:
+            rewrites[bid] = text
+    return rewrites
+
+
+# --- Stage 0b: gap / match analysis against the candidate's real background ----
+#
+# The core thing GPT/Gemini give you that pure keyword-stuffing does not: an
+# honest read on which JD requirements the candidate's actual experience
+# supports, which are only partially evidenced, and which are simply missing.
+# This judges each JD requirement against the FULL resume (summary + skills +
+# experience bullets + project bullets) so the UI can surface a gaps panel and
+# the user can decide what to address - instead of blindly listing skills they
+# can't back up.
+_GAP_SYSTEM_PROMPT = """\
+You are a candid career coach comparing a candidate's resume to a target job. \
+Your job is to tell the candidate the TRUTH about how well their actual \
+experience supports this job's requirements - not to flatter them.
+
+You will be given:
+- `resume`: the candidate's real background (summary, skill lists, and the \
+bullet points from their experience and projects). This is the ONLY evidence \
+of what they can actually do.
+- `requirements`: the job's must-haves and key hard skills.
+
+For EACH requirement, judge two things:
+
+(A) how well the resume's evidence supports it (`status`):
+- "strong": the resume clearly demonstrates this through concrete experience, \
+projects, or skills.
+- "partial": the resume shows related/adjacent experience but not a direct, \
+clear match (e.g. requirement is "Power BI" and the resume shows Tableau and \
+general dashboarding, but not Power BI specifically).
+- "missing": nothing in the resume supports this requirement.
+
+(B) how important it is to THIS job (`importance`):
+- "critical": a core, must-have skill the job clearly centers on or lists as a \
+hard requirement - missing it would seriously weaken the application.
+- "nice_to_have": a secondary, optional, or peripheral keyword - a bonus, not \
+a dealbreaker.
+Be selective: only a handful of the requirements should be "critical". When in \
+doubt, choose "nice_to_have".
+
+Be honest and conservative on status: do NOT rate something "strong" unless the \
+resume genuinely backs it up. A keyword merely appearing in a skills list, with \
+no supporting experience, is at most "partial".
+
+Then write 1-3 short, specific, actionable suggestions for the biggest gaps \
+(the "missing"/"partial" items that matter most for this job) - e.g. which \
+real experience to emphasize, or which genuine skill the candidate should add \
+to their master resume if they actually have it. Never tell the candidate to \
+fabricate experience.
+
+Respond with ONLY a JSON object (no markdown, no commentary) with this exact \
+shape:
+{
+  "requirements": [
+    {"requirement": "<requirement text, exactly as given>",
+     "status": "strong" or "partial" or "missing",
+     "importance": "critical" or "nice_to_have",
+     "evidence": "<one short phrase citing what in the resume supports it, \
+or empty string if missing>"},
+    ...
+  ],
+  "suggestions": ["<short actionable suggestion>", ...]
+}
+
+Every requirement from the input MUST appear exactly once in `requirements`.
+"""
+
+
+def _resume_evidence(master: dict) -> dict:
+    """Condense the master resume into just the evidence relevant to gap
+    analysis - summary, flat skill list, and experience/project bullets -
+    keeping the prompt focused and small."""
+    skills = [
+        kw for group in master.get("skills", []) for kw in group.get("keywords", [])
+    ]
+    skills += [
+        kw for group in master.get("core_competencies", []) for kw in group.get("keywords", [])
+    ]
+    experience = [
+        {"title": job.get("title", ""), "company": job.get("company", ""), "bullets": job.get("bullets", [])}
+        for job in master.get("experience", [])
+    ]
+    projects = [
+        {"name": proj.get("name", ""), "bullets": proj.get("bullets", [])}
+        for proj in master.get("projects", [])
+    ]
+    return {
+        "summary": master.get("summary") or "",
+        "skills": skills,
+        "experience": experience,
+        "projects": projects,
+    }
+
+
+def analyze_gaps(master: dict, jd_analysis: dict) -> dict:
+    """Judge how well the candidate's real background supports the job.
+
+    Returns {"requirements": [{requirement, status, importance, evidence}, ...],
+             "suggestions": [str, ...],
+             "suggested_skills": [str, ...]}, where status is
+    "strong"/"partial"/"missing" and importance is "critical"/"nice_to_have".
+
+    `suggested_skills` is the subset worth proactively offering to add to the
+    resume: requirements judged "critical" importance, NOT already on the
+    resume, and only "missing"/"partial" in status (skills the candidate may
+    genuinely have but didn't list). The UI surfaces these as an opt-in
+    checklist so the user can include a crucial skill they actually possess
+    (e.g. "data lakehouse") instead of it silently never appearing. We never
+    auto-add them - the user must confirm.
+
+    On any Ollama error or malformed response returns empty lists (fail open).
+    """
+    requirements = list(
+        dict.fromkeys(
+            [str(r) for r in (jd_analysis.get("must_haves") or []) if str(r).strip()]
+            + [str(k) for k in (jd_analysis.get("hard_keywords") or []) if str(k).strip()]
+        )
+    )
+    if not requirements:
+        return {"requirements": [], "suggestions": [], "suggested_skills": []}
+
+    payload = {
+        "resume": _resume_evidence(master),
+        "requirements": requirements,
+    }
+    try:
+        result = chat_json(_GAP_SYSTEM_PROMPT, json.dumps(payload, indent=2), temperature=0.0)
+    except OllamaError:
+        return {"requirements": [], "suggestions": [], "suggested_skills": []}
+
+    if not isinstance(result, dict):
+        return {"requirements": [], "suggestions": [], "suggested_skills": []}
+
+    # Skills already on the resume (any section), for excluding from suggestions.
+    present_lower = {
+        kw.strip().lower()
+        for group in (master.get("skills", []) or []) + (master.get("core_competencies", []) or [])
+        for kw in group.get("keywords", []) or []
+    }
+
+    valid_status = {"strong", "partial", "missing"}
+    requirements_out = []
+    suggested_skills: list[str] = []
+    for item in result.get("requirements") or []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "")).strip().lower()
+        if status not in valid_status:
+            continue
+        requirement = str(item.get("requirement", "")).strip()
+        importance = str(item.get("importance", "")).strip().lower()
+        if importance not in {"critical", "nice_to_have"}:
+            importance = "nice_to_have"
+        requirements_out.append(
+            {
+                "requirement": requirement,
+                "status": status,
+                "importance": importance,
+                "evidence": str(item.get("evidence", "") or "").strip(),
+            }
+        )
+        # Crucial skill the resume doesn't clearly have -> offer to add it.
+        if (
+            importance == "critical"
+            and status in {"missing", "partial"}
+            and requirement
+            and requirement.strip().lower() not in present_lower
+        ):
+            suggested_skills.append(requirement)
+
+    suggestions = [str(s).strip() for s in (result.get("suggestions") or []) if str(s).strip()]
+    return {
+        "requirements": requirements_out,
+        "suggestions": suggestions,
+        "suggested_skills": suggested_skills,
+    }
+
+
+# --- Stage 3b: auto-categorize keywords with no route-map entry ---------------
+#
+# When a JD keyword has no entry in skill_category_map.yaml, the old behavior
+# was to immediately stop and ask the user which category it belongs in. That
+# is friction with little payoff. Instead, we first ask the LLM to place each
+# unmatched keyword into one of the candidate's EXISTING categories, the
+# catch-all, or to DROP it entirely (when it isn't a real, resume-appropriate
+# skill). Only keywords the LLM itself can't place (returns "ASK") fall through
+# to the user prompt. Placements into a real category are persisted to the
+# route map so future runs are deterministic.
+_AUTO_CATEGORIZE_SYSTEM_PROMPT = """\
+You are organizing skill keywords pulled from a job description into the \
+correct section of a candidate's resume.
+
+You will be given:
+- `categories`: the names of the candidate's EXISTING skill/competency \
+categories on this resume section.
+- `catch_all`: the name of a generic catch-all category to use for real \
+skills that don't fit any existing category well.
+- `keywords`: keywords from the job description that need to be placed.
+
+For each keyword, choose exactly ONE of:
+- The name of one of the EXISTING `categories`, if the keyword clearly belongs \
+to that category's subject area.
+- The `catch_all` name, if the keyword is a real, resume-appropriate skill / \
+tool / competency but doesn't fit any existing category.
+- "DROP", if the keyword is NOT a real, resume-appropriate skill - for \
+example it describes the job/role itself ("high-impact analytics role", \
+"fast-paced environment"), is a generic filler phrase, a department/team \
+name, or a sentence fragment rather than a skill label.
+- "ASK", ONLY if you genuinely cannot tell where it belongs and it might be a \
+real skill - use this sparingly; prefer making a decision.
+
+Respond with ONLY a JSON object (no markdown, no commentary) mapping each \
+keyword (exactly as given) to your choice:
+{
+  "<keyword>": "<existing category name>" or "<catch_all name>" or "DROP" \
+or "ASK",
+  ...
+}
+
+Every keyword from the input MUST appear as a key in your response, exactly \
+as given.
+"""
+
+
+def _auto_categorize_keywords(
+    keywords: list[str],
+    categories: list[str],
+    catch_all: str,
+) -> dict[str, str]:
+    """Ask the LLM to place each unmatched keyword into an existing category,
+    the catch-all, DROP, or ASK.
+
+    Returns {keyword -> decision}, where decision is one of: an exact name
+    from `categories`, `catch_all`, "DROP", or "ASK". Keywords the model
+    omits, or maps to an unrecognized value, default to "ASK" so they fall
+    through to the user rather than being silently mishandled. On any Ollama
+    error returns "ASK" for every keyword (fail open to the user prompt).
     """
     if not keywords:
         return {}
 
-    user_prompt = json.dumps({"categories": categories, "keywords": keywords}, indent=2)
+    valid_targets = set(categories) | {catch_all}
+    payload = {
+        "categories": categories,
+        "catch_all": catch_all,
+        "keywords": keywords,
+    }
     try:
-        result = chat_json(_CLASSIFY_SYSTEM_PROMPT, user_prompt, temperature=0.0)
+        result = chat_json(
+            _AUTO_CATEGORIZE_SYSTEM_PROMPT, json.dumps(payload, indent=2), temperature=0.0
+        )
     except OllamaError:
-        return {kw: "__OTHER__" for kw in keywords}
+        return {kw: "ASK" for kw in keywords}
 
-    valid = set(categories)
-    out: dict[str, str] = {}
+    if not isinstance(result, dict):
+        return {kw: "ASK" for kw in keywords}
+
+    decisions: dict[str, str] = {}
     for kw in keywords:
-        category = result.get(kw)
-        if isinstance(category, str) and category in valid:
-            out[kw] = category
+        choice = result.get(kw)
+        if choice in valid_targets or choice in ("DROP", "ASK"):
+            decisions[kw] = choice
         else:
-            out[kw] = "__OTHER__"
-    return out
+            decisions[kw] = "ASK"
+    return decisions
 
 
 # --- Stage 4: verify newly-added keywords -------------------------------------
@@ -753,7 +1156,8 @@ def _merge_jd_keywords(
     *,
     canonicalize=None,
     learned: dict[str, str] | None = None,
-) -> tuple[dict[str, list[str]], list[tuple[str, list[str]]], dict[str, list[str]]]:
+    category_overrides: dict[str, str] | None = None,
+) -> tuple[dict[str, list[str]], list[tuple[str, list[str]]], dict[str, list[str]], list[str]]:
     """Deterministically merge `jd_keywords` into a resume section.
 
     Starts from `orig_groups` verbatim (so nothing the user wrote can ever be
@@ -765,16 +1169,19 @@ def _merge_jd_keywords(
     3. Look the (canonical, lowercase) keyword up in `route_map`
        (data/skill_category_map.yaml). If it names an existing category,
        append there.
-    4. Otherwise, fall back to the LLM via `_classify_unmapped` (batched
-       across all unmapped keywords in one call). Keywords the model assigns
-       to a real category go there; everything else (including "__OTHER__")
-       goes into a single `extra_category_name` bucket.
+    4. Otherwise, look it up in `category_overrides` (lowercase keyword ->
+       category name or `extra_category_name`/"__OTHER__" for the catch-all),
+       which holds choices the user already made for this run via the
+       categorization prompt. If present, route there.
+    5. Otherwise, the keyword is unresolved: record it in
+       `needs_categorization` so the caller can ask the user, and do NOT add
+       it to any section yet.
 
     Newly-resolved (keyword -> category) pairs from steps 3-4 are recorded
     into `learned` (if provided) so the caller can persist them to
     skill_category_map.yaml.
 
-    Returns (by_category, extras, added_by_category):
+    Returns (by_category, extras, added_by_category, needs_categorization):
     - by_category: {orig category name lowercased -> keywords list}, seeded
       from `orig_groups` (mutated copies, originals never removed).
     - extras: [(extra_category_name, [new keywords...])] - a single extra
@@ -784,6 +1191,10 @@ def _merge_jd_keywords(
       part of `orig_groups`), so callers can run a verification/cleanup pass
       over just the new additions without touching the user's original
       content.
+    - needs_categorization: [keyword, ...] - keywords with no route-map entry
+      and no matching `category_overrides` entry. The caller should ask the
+      user which category each belongs to and re-run with those choices in
+      `category_overrides`.
     """
     by_category: dict[str, list[str]] = {
         g["category"].strip().lower(): list(g["keywords"]) for g in orig_groups
@@ -834,47 +1245,72 @@ def _merge_jd_keywords(
         else:
             pending.append(label)
 
-    # Pass 2: LLM fallback for keywords with no route-map entry.
+    # Pass 2: keywords with no route-map entry - resolve via user-provided
+    # `category_overrides`, or flag for the user to categorize.
     if pending:
         # Re-check duplicates (canonicalization in pass 1 may have produced
         # the same label for two different JD keywords).
         pending = [kw for kw in pending if not _is_duplicate(kw)]
 
-    if pending:
-        category_names = [category_display[k] for k in by_category]
-        classification = _classify_unmapped(pending, category_names)
-        for kw in pending:
-            if _is_duplicate(kw):
-                continue
-            chosen = classification.get(kw, "__OTHER__")
-            target_key = chosen.strip().lower()
-            if chosen != "__OTHER__" and target_key in by_category:
-                by_category[target_key].append(kw)
-                added_by_category[target_key].append(kw)
-                if learned is not None:
-                    learned[kw.strip().lower()] = category_display[target_key]
-            else:
-                extra_keywords.append(kw)
-            _record(kw, _significant_words(kw))
+    needs_categorization: list[str] = []
+    overrides = category_overrides or {}
+    for kw in pending:
+        if _is_duplicate(kw):
+            continue
+        chosen = overrides.get(kw.strip().lower())
+        if chosen is None:
+            needs_categorization.append(kw)
+            continue
+        target_key = chosen.strip().lower()
+        if chosen != "__OTHER__" and target_key in by_category:
+            by_category[target_key].append(kw)
+            added_by_category[target_key].append(kw)
+            if learned is not None:
+                learned[kw.strip().lower()] = category_display[target_key]
+        else:
+            extra_keywords.append(kw)
+        _record(kw, _significant_words(kw))
 
     extras: list[tuple[str, list[str]]] = []
     if extra_keywords:
         extras.append((extra_category_name, extra_keywords))
 
-    return by_category, extras, added_by_category
+    return by_category, extras, added_by_category, needs_categorization
 
 
-def tailor_resume(master: dict, jd_analysis: dict) -> dict:
+def tailor_resume(
+    master: dict,
+    jd_analysis: dict,
+    category_overrides: dict[str, str] | None = None,
+) -> dict:
     """Reword/reorder an existing resume to match a job description.
 
     `master` is a resume dict (e.g. from `resume_to_dict()`).
     `jd_analysis` is the dict returned by `analyze_job()`.
+    `category_overrides` (optional) maps lowercase JD keyword -> category
+    name (or "__OTHER__"/the section's "Additional ..." catch-all name),
+    for keywords the user has already categorized via the UI prompt (see
+    `needs_categorization` below).
 
-    NOTE: `experience` (Professional Experience) is NEVER modified - it is
-    copied verbatim from `master` into `tailored_resume` and is not part of
-    the diff, since the LLM is not allowed to touch them.
+    NOTE: experience/project bullets MAY now be reworded by the LLM to better
+    fit the target role and ATS (`_rewrite_experience_bullets`), but ONLY
+    reframing - every number, tool, employer, date and outcome is preserved.
+    `honesty_guard.filter_bullet_rewrites` deterministically reverts any
+    rewrite that introduces a new number or names a tool absent from the
+    original bullet, so facts are never fabricated. Structural fields
+    (companies, titles, dates) are always copied verbatim.
 
-    Returns:
+    Returns EITHER:
+        {"needs_categorization": [{"keyword": str, "categories": [str, ...],
+                                    "extra_category": str}, ...]}
+      ONLY when JD keywords have no entry in skill_category_map.yaml, no
+      matching `category_overrides`, AND the LLM auto-categorizer
+      (`_auto_categorize_keywords`) also couldn't place them ("ASK"). This is
+      now rare - the LLM places or drops most unmapped keywords itself. The
+      caller should ask the user which category each remaining keyword belongs
+      to, then re-call with those choices in `category_overrides`.
+
+    OR, once every unmapped keyword is placed/dropped:
         {
           "tailored_resume": dict,   # full resume dict, same shape as `master`,
                                       # with title_line/skills replaced by
@@ -883,26 +1319,145 @@ def tailor_resume(master: dict, jd_analysis: dict) -> dict:
                                       # copied from master)
           "diff": {
               "title_line": {"original": str, "tailored": str},
-              "skills": [{"category": str, "original": [...], "tailored": [...]}],
-              "core_competencies": [{"category": str, "original": [...], "tailored": [...]}],
+              "skills": [{"category": str, "original": [...], "tailored": [...],
+                          "low_relevance": bool}],
+              "core_competencies": [{"category": str, "original": [...],
+                                      "tailored": [...], "low_relevance": bool}],
+              "experience": [{"label": str, "sublabel": str,
+                               "bullets": [{"original": str, "tailored": str}]}],
+              "projects": [{"label": str, "sublabel": str,
+                             "bullets": [{"original": str, "tailored": str}]}],
           },
+          "gap_report": {
+              "requirements": [{"requirement": str,
+                                 "status": "strong"|"partial"|"missing",
+                                 "importance": "critical"|"nice_to_have",
+                                 "evidence": str}, ...],
+              "suggestions": [str, ...],
+              "suggested_skills": [str, ...],  # crucial skills the resume
+                  # lacks, offered to the user to opt into (see analyze_gaps).
+          },   # honest read on which JD requirements the real background
+               # supports; see `analyze_gaps`. Empty lists if the LLM errored.
         }
+
+    Categories flagged `"low_relevance": true` are existing categories the
+    LLM judged a poor fit for this job (see `_classify_category_relevance`);
+    they are moved to the end of their section but never removed - the UI
+    should surface them as "suggested for removal" and let the user decide.
 
     Approach: `title_line`/`summary` rewording is delegated to the LLM (a
     small, flat request it handles reliably). Adding JD keywords into
     `skills`/`core_competencies` and choosing their categories is done
     deterministically in Python via `_merge_jd_keywords`, using
-    data/skill_category_map.yaml plus a small LLM fallback for unmapped
-    keywords - this is the part Llama could not reliably do in one shot.
-    Each section may gain at most one new category beyond those in `master`
-    (an "Additional Skills"/"Additional Competencies" catch-all for keywords
-    that fit no existing category); such a new category has `"original": []`
-    in the diff.
+    data/skill_category_map.yaml plus `category_overrides` for keywords with
+    no map entry. Each section may gain at most one new category beyond
+    those in `master` (an "Additional Skills"/"Additional Competencies"
+    catch-all for keywords the user routes there); such a new category has
+    `"original": []` in the diff.
 
     Raises OllamaError on connection/JSON issues with the reword step.
     """
     orig_skills = master.get("skills", [])
     orig_competencies = master.get("core_competencies", [])
+
+    # --- Stage 2/3: deterministically merge JD keywords into skills/competencies ---
+    # Done before the (expensive) reword LLM call so we can short-circuit and
+    # ask the user about unmapped keywords without wasting that call.
+    skill_category_map = _load_skill_category_map()
+    learned_hard: dict[str, str] = {}
+    learned_soft: dict[str, str] = {}
+
+    skills_by_cat, skills_extras, skills_added, skills_needs_cat = _merge_jd_keywords(
+        orig_skills,
+        jd_analysis.get("hard_keywords", []) or [],
+        skill_category_map["hard_skills"],
+        "Additional Skills",
+        learned=learned_hard,
+        category_overrides=category_overrides,
+    )
+    comp_by_cat, comp_extras, comp_added, comp_needs_cat = _merge_jd_keywords(
+        orig_competencies,
+        jd_analysis.get("soft_keywords", []) or [],
+        skill_category_map["soft_skills"],
+        "Additional Competencies",
+        canonicalize=_canonical_soft_skill,
+        learned=learned_soft,
+        category_overrides=category_overrides,
+    )
+
+    # --- Stage 3b: let the LLM place unmatched keywords before asking the user ---
+    # Any keyword with no route-map entry and no user override lands in
+    # *_needs_cat. Rather than immediately prompting the user, ask the LLM to
+    # categorize / drop each. Only keywords the LLM also can't place ("ASK")
+    # fall through to the user. Decisions are folded into category_overrides
+    # and the merge is re-run so the placements actually take effect (and get
+    # persisted to the route map).
+    if skills_needs_cat or comp_needs_cat:
+        auto_overrides: dict[str, str] = dict(category_overrides or {})
+        still_unresolved_skills: list[str] = []
+        still_unresolved_comps: list[str] = []
+
+        skill_decisions = _auto_categorize_keywords(
+            skills_needs_cat, [g["category"] for g in orig_skills], "Additional Skills"
+        )
+        comp_decisions = _auto_categorize_keywords(
+            comp_needs_cat, [g["category"] for g in orig_competencies], "Additional Competencies"
+        )
+
+        for kw, decision in skill_decisions.items():
+            if decision == "ASK":
+                still_unresolved_skills.append(kw)
+            elif decision == "DROP":
+                pass  # not a real skill - silently omit
+            else:
+                auto_overrides[kw.strip().lower()] = decision
+        for kw, decision in comp_decisions.items():
+            if decision == "ASK":
+                still_unresolved_comps.append(kw)
+            elif decision == "DROP":
+                pass
+            else:
+                auto_overrides[kw.strip().lower()] = decision
+
+        # Re-run the merge with the LLM's placements applied. Keywords the LLM
+        # routed to a catch-all ("Additional ...") resolve there; ones it
+        # routed to a real category get appended (and learned/persisted).
+        skills_by_cat, skills_extras, skills_added, _ = _merge_jd_keywords(
+            orig_skills,
+            jd_analysis.get("hard_keywords", []) or [],
+            skill_category_map["hard_skills"],
+            "Additional Skills",
+            learned=learned_hard,
+            category_overrides=auto_overrides,
+        )
+        comp_by_cat, comp_extras, comp_added, _ = _merge_jd_keywords(
+            orig_competencies,
+            jd_analysis.get("soft_keywords", []) or [],
+            skill_category_map["soft_skills"],
+            "Additional Competencies",
+            canonicalize=_canonical_soft_skill,
+            learned=learned_soft,
+            category_overrides=auto_overrides,
+        )
+
+        # Only genuinely unplaceable keywords still go to the user.
+        if still_unresolved_skills or still_unresolved_comps:
+            needs_categorization = [
+                {
+                    "keyword": kw,
+                    "categories": [g["category"] for g in orig_skills],
+                    "extra_category": "Additional Skills",
+                }
+                for kw in still_unresolved_skills
+            ] + [
+                {
+                    "keyword": kw,
+                    "categories": [g["category"] for g in orig_competencies],
+                    "extra_category": "Additional Competencies",
+                }
+                for kw in still_unresolved_comps
+            ]
+            return {"needs_categorization": needs_categorization}
 
     # --- Stage 1: LLM rewords title_line/summary only (flat, small prompt) ---
     reword_prompt = (
@@ -915,27 +1470,6 @@ def tailor_resume(master: dict, jd_analysis: dict) -> dict:
 
     new_title_line = str(reworded.get("title_line") or master.get("title_line") or "")
     new_summary = str(reworded.get("summary") or master.get("summary") or "")
-
-    # --- Stage 2/3: deterministically merge JD keywords into skills/competencies ---
-    skill_category_map = _load_skill_category_map()
-    learned_hard: dict[str, str] = {}
-    learned_soft: dict[str, str] = {}
-
-    skills_by_cat, skills_extras, skills_added = _merge_jd_keywords(
-        orig_skills,
-        jd_analysis.get("hard_keywords", []) or [],
-        skill_category_map["hard_skills"],
-        "Additional Skills",
-        learned=learned_hard,
-    )
-    comp_by_cat, comp_extras, comp_added = _merge_jd_keywords(
-        orig_competencies,
-        jd_analysis.get("soft_keywords", []) or [],
-        skill_category_map["soft_skills"],
-        "Additional Competencies",
-        canonicalize=_canonical_soft_skill,
-        learned=learned_soft,
-    )
 
     # Drop newly-added competencies that just restate an existing one in
     # different words (e.g. a new "Problem-Solving" when "Analytical &
@@ -955,44 +1489,114 @@ def tailor_resume(master: dict, jd_analysis: dict) -> dict:
     _verify_additions(skills_by_cat, skills_added, skills_extras)
     _verify_additions(comp_by_cat, comp_added, comp_extras)
 
-    def _assemble(orig_groups, by_category, extras) -> list[dict]:
-        """Rebuild a section in original category order, then append any
-        new categories the model introduced."""
+    # --- Stage 0: flag existing categories that don't fit this job ---------
+    # Reorders categories so ones unrelated to this job sink to the bottom and
+    # are flagged in the diff as "suggested for removal" - the candidate's
+    # content is never deleted, only reordered/flagged. Fails open (treats
+    # everything as relevant) on any Ollama error.
+    skill_category_names = [g["category"] for g in orig_skills]
+    comp_category_names = [g["category"] for g in orig_competencies]
+    low_relevance_skills, low_relevance_comps = _classify_category_relevance(
+        jd_analysis, skill_category_names, comp_category_names
+    )
+
+    def _assemble(orig_groups, by_category, extras, low_relevance: set[str]) -> list[dict]:
+        """Rebuild a section in original category order (relevant categories
+        first, low-relevance ones last), then append any new categories the
+        model introduced."""
         groups = [
             {"category": g["category"], "keywords": by_category[g["category"].strip().lower()]}
             for g in orig_groups
+            if g["category"] not in low_relevance
+        ] + [
+            {"category": g["category"], "keywords": by_category[g["category"].strip().lower()]}
+            for g in orig_groups
+            if g["category"] in low_relevance
         ]
         for category, keywords in extras:
             if category and keywords:
                 groups.append({"category": category, "keywords": keywords})
         return groups
 
-    def _section_diff(orig_groups, by_category, extras) -> list[dict]:
-        return [
-            {
+    def _section_diff(orig_groups, by_category, extras, low_relevance: set[str]) -> list[dict]:
+        def _group(g: dict) -> dict:
+            return {
                 "category": g["category"],
                 "original": list(g["keywords"]),
                 "tailored": by_category[g["category"].strip().lower()],
+                "low_relevance": g["category"] in low_relevance,
             }
-            for g in orig_groups
-        ] + [
-            {"category": category, "original": [], "tailored": keywords}
+
+        ordered = [g for g in orig_groups if g["category"] not in low_relevance] + [
+            g for g in orig_groups if g["category"] in low_relevance
+        ]
+        return [_group(g) for g in ordered] + [
+            {"category": category, "original": [], "tailored": keywords, "low_relevance": False}
             for category, keywords in extras
             if category and keywords
         ]
+
+    def _bullet_section_diff(items, id_prefix, label_key, sub_key, rewrites) -> list[dict]:
+        """Per-entry diff of experience/project bullets, showing each bullet's
+        original vs. rewritten text (rewritten == original when no guard-
+        approved rewrite exists). `label_key`/`sub_key` name the heading fields
+        (e.g. company/title)."""
+        out = []
+        for idx, item in enumerate(items):
+            bullets = item.get("bullets", []) or []
+            out.append(
+                {
+                    "label": item.get(label_key, "") or "",
+                    "sublabel": (item.get(sub_key, "") or "") if sub_key else "",
+                    "bullets": [
+                        {
+                            "original": str(b),
+                            "tailored": rewrites.get(f"{id_prefix}:{idx}:{bi}", str(b)),
+                        }
+                        for bi, b in enumerate(bullets)
+                    ],
+                }
+            )
+        return out
+
+    # --- Stage 1b: rewrite experience/project bullets toward the target role ---
+    # The LLM reframes each bullet for the job; `filter_bullet_rewrites` then
+    # reverts any rewrite that introduced a new number or named a tool not in
+    # the original, so facts/metrics/tools can never be fabricated. Ids encode
+    # position so we can map rewrites back onto the right bullet.
+    raw_rewrites = _rewrite_experience_bullets(master, jd_analysis)
+    bullet_originals: dict[str, str] = {}
+    for ji, job in enumerate(master.get("experience", []) or []):
+        for bi, bullet in enumerate(job.get("bullets", []) or []):
+            bullet_originals[f"exp:{ji}:{bi}"] = str(bullet)
+    for pi, proj in enumerate(master.get("projects", []) or []):
+        for bi, bullet in enumerate(proj.get("bullets", []) or []):
+            bullet_originals[f"proj:{pi}:{bi}"] = str(bullet)
+    bullet_rewrites = filter_bullet_rewrites(raw_rewrites, bullet_originals)
 
     # --- Build the full tailored resume dict (copy master, replace allowed fields) ---
     tailored_resume = json.loads(json.dumps(master))  # deep copy
 
     tailored_resume["title_line"] = new_title_line
     tailored_resume["summary"] = new_summary
-    tailored_resume["skills"] = _assemble(orig_skills, skills_by_cat, skills_extras)
+    tailored_resume["skills"] = _assemble(orig_skills, skills_by_cat, skills_extras, low_relevance_skills)
     tailored_resume["core_competencies"] = _assemble(
-        orig_competencies, comp_by_cat, comp_extras
+        orig_competencies, comp_by_cat, comp_extras, low_relevance_comps
     )
 
-    # `experience` and `projects` are never modified - kept exactly as in the
-    # master resume (already present via the deep copy above).
+    # Apply the (guard-approved) bullet rewrites onto experience/projects.
+    # Facts are preserved; only phrasing/emphasis changes. Bullets with no
+    # surviving rewrite keep their original text.
+    for ji, job in enumerate(tailored_resume.get("experience", []) or []):
+        job["bullets"] = [
+            bullet_rewrites.get(f"exp:{ji}:{bi}", b)
+            for bi, b in enumerate(job.get("bullets", []) or [])
+        ]
+    for pi, proj in enumerate(tailored_resume.get("projects", []) or []):
+        proj["bullets"] = [
+            bullet_rewrites.get(f"proj:{pi}:{bi}", b)
+            for bi, b in enumerate(proj.get("bullets", []) or [])
+        ]
 
     # --- Build diff structure for the UI --------------------------------------
     diff = {
@@ -1004,21 +1608,92 @@ def tailor_resume(master: dict, jd_analysis: dict) -> dict:
             "original": master.get("summary") or "",
             "tailored": new_summary,
         },
-        "skills": _section_diff(orig_skills, skills_by_cat, skills_extras),
-        "core_competencies": _section_diff(orig_competencies, comp_by_cat, comp_extras),
+        "skills": _section_diff(orig_skills, skills_by_cat, skills_extras, low_relevance_skills),
+        "core_competencies": _section_diff(
+            orig_competencies, comp_by_cat, comp_extras, low_relevance_comps
+        ),
+        "experience": _bullet_section_diff(
+            master.get("experience", []) or [], "exp", "company", "title", bullet_rewrites
+        ),
+        "projects": _bullet_section_diff(
+            master.get("projects", []) or [], "proj", "name", None, bullet_rewrites
+        ),
     }
+
+    # --- Gap / match analysis: how well the real background fits this job ---
+    gap_report = analyze_gaps(master, jd_analysis)
 
     return {
         "tailored_resume": tailored_resume,
         "diff": diff,
+        "gap_report": gap_report,
     }
+
+
+def add_skills_to_resume(skills_section: list[dict], skill_names: list[str]) -> list[dict]:
+    """Insert user-confirmed skills into a resume's `skills` section.
+
+    Used when the user opts into crucial JD skills the resume lacked (see
+    `analyze_gaps` -> `suggested_skills`). Each name is routed to a category
+    via data/skill_category_map.yaml, then the LLM auto-categorizer for any
+    without a map entry (falling back to an "Additional Skills" catch-all if
+    even that can't place it). Newly-learned routes are persisted so future
+    runs are deterministic. Skills already present (by near-duplicate match)
+    are skipped.
+
+    `skills_section` is the tailored resume's `skills` list (list of
+    {category, keywords}); it is NOT mutated. Returns a NEW skills section
+    list with the confirmed skills inserted into their categories (a new
+    "Additional Skills" group is appended only if needed).
+    """
+    names = [str(s).strip() for s in skill_names if str(s).strip()]
+    if not names:
+        return [dict(g) for g in skills_section]
+
+    route_map = _load_skill_category_map()["hard_skills"]
+    learned: dict[str, str] = {}
+
+    # First merge what the route map can resolve; collect the rest.
+    by_cat, extras, _added, needs_cat = _merge_jd_keywords(
+        skills_section, names, route_map, "Additional Skills", learned=learned
+    )
+
+    # Auto-categorize anything unmapped; fall back to catch-all (never "ASK"
+    # here - the user already confirmed they want these in, so we must place
+    # them rather than prompt again).
+    if needs_cat:
+        decisions = _auto_categorize_keywords(
+            needs_cat, [g["category"] for g in skills_section], "Additional Skills"
+        )
+        overrides = {
+            kw.strip().lower(): (dec if dec not in ("ASK", "DROP") else "Additional Skills")
+            for kw, dec in decisions.items()
+        }
+        by_cat, extras, _added, _ = _merge_jd_keywords(
+            skills_section, names, route_map, "Additional Skills",
+            learned=learned, category_overrides=overrides,
+        )
+
+    _append_skill_map_entries(learned, {})
+
+    # Rebuild the section in original order, then append any catch-all extras.
+    out = [
+        {"category": g["category"], "keywords": by_cat[g["category"].strip().lower()]}
+        for g in skills_section
+    ]
+    for category, keywords in extras:
+        if category and keywords:
+            out.append({"category": category, "keywords": keywords})
+    return out
 
 
 # --- Cover letter generation ---------------------------------------------------
 
 _COVER_LETTER_SYSTEM_PROMPT = """\
-You are an expert career writer producing a professional cover letter for a \
-candidate applying to a specific job.
+You are a thoughtful career writer helping a real person write a cover letter \
+they'd actually be proud to send. It should read like the candidate wrote it \
+themselves on a good day - warm, specific, and human - NOT like a template or \
+an AI.
 
 You will be given:
 1. The candidate's resume as JSON (summary, skills, experience, projects).
@@ -1026,20 +1701,34 @@ You will be given:
 3. The company name and role title (may be empty).
 
 Write a cover letter body of 3-4 short paragraphs:
-1. Opening: state the role being applied for and a brief, genuine hook \
-connecting the candidate's background to the role.
-2. Middle paragraph(s): highlight 2-3 specific, relevant accomplishments or \
-skills from the resume that map to the job's key requirements. Use concrete \
-details (numbers, tools, outcomes) that ALREADY APPEAR in the resume.
-3. Closing: express enthusiasm for the role/company and interest in \
-discussing further.
+1. Opening: open with a genuine, specific hook - what draws this person to \
+THIS role or company, tied to something real in their background. Avoid \
+boilerplate; sound like a person, not a form letter.
+2. Middle paragraph(s): tell 1-2 brief, concrete stories from the resume that \
+map to the job's key needs - a real accomplishment with its actual outcome \
+(numbers/tools/results that ALREADY APPEAR in the resume), framed as "here's \
+how I'd help you", not just a restatement of bullet points.
+3. Closing: a confident, sincere sign-off - genuine enthusiasm for the role \
+and a forward-looking note about contributing, without grovelling.
 
-Rules:
+Voice & tone:
+- Write in natural first person ("I"), with the warmth and rhythm of real \
+human writing. Vary sentence length. It's fine to show a little personality \
+and authentic enthusiasm.
+- Be specific over generic: name the actual company/role and the actual work, \
+not "your esteemed organization" or "a fast-paced environment".
+- Confident but not arrogant; concise but not robotic.
+
+Hard rules:
 - Every fact, number, tool, employer, or accomplishment mentioned MUST already \
-appear in the provided resume JSON. Do NOT invent anything.
-- Do NOT fabricate company-specific details beyond the company name/role given.
-- Professional, confident, concise tone. No clichés like "I am writing to \
-express my interest" - get to the point.
+appear in the provided resume JSON. Do NOT invent anything - no fake metrics, \
+employers, tools, or experiences.
+- Do NOT fabricate company-specific details beyond the company name/role \
+given (don't praise products or facts you weren't told).
+- BAN these clichés and openers: "I am writing to express my interest", "I am \
+excited to apply", "esteemed", "fast-paced environment", "team player", \
+"perfect fit", "wealth of experience", "proven track record", "synergy", "I \
+believe I would be a great fit". Get to something real instead.
 - Do not include a salutation ("Dear ...") or signature ("Sincerely, ...") - \
 those are added separately by the template.
 

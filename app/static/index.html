@@ -12,77 +12,144 @@
     <p class="subtitle">Tailor your resume &amp; cover letter to a job description, locally.</p>
   </header>
 
-  <main>
-    <!-- Step 1: Job description input -->
-    <section class="card" id="step-jd">
-      <h2>1. Job Description</h2>
-      <div class="row">
-        <div class="field">
-          <label for="company">Company (optional)</label>
-          <input type="text" id="company" placeholder="Acme Corp" />
+  <div class="layout">
+    <!-- LEFT RAIL: inputs, detected keywords, match analysis, actions -->
+    <aside class="rail">
+      <section class="card" id="step-jd">
+        <h2>Job Description</h2>
+        <div class="row">
+          <div class="field">
+            <label for="company">Company</label>
+            <input type="text" id="company" placeholder="Acme Corp" />
+          </div>
+          <div class="field">
+            <label for="role">Role title</label>
+            <input type="text" id="role" placeholder="Data Analyst" />
+          </div>
         </div>
-        <div class="field">
-          <label for="role">Role title (optional)</label>
-          <input type="text" id="role" placeholder="Data Analyst" />
+        <label for="jd-text">Paste job description</label>
+        <textarea id="jd-text" rows="8" placeholder="Paste the full job description here..."></textarea>
+        <div class="actions">
+          <button id="btn-analyze">Analyze</button>
+          <span class="status" id="status-analyze"></span>
         </div>
-      </div>
-      <label for="jd-text">Paste job description</label>
-      <textarea id="jd-text" rows="10" placeholder="Paste the full job description here..."></textarea>
+      </section>
+
+      <section class="card hidden" id="step-analysis">
+        <h2>Detected Keywords</h2>
+        <div id="analysis-output"></div>
+        <div class="actions">
+          <button id="btn-tailor">Tailor Resume &amp; Cover Letter</button>
+          <span class="status" id="status-tailor"></span>
+        </div>
+      </section>
+
+      <section class="card hidden" id="step-gap">
+        <h2>Match Analysis</h2>
+        <div id="gap-report"></div>
+      </section>
+    </aside>
+
+    <!-- RIGHT PANE: tabbed review (resume diff / cover letter) -->
+    <main class="pane">
+      <section class="card hidden" id="step-review">
+        <div class="tabs" id="review-tabs">
+          <button class="tab active" data-tab="resume">Resume</button>
+          <button class="tab" data-tab="cover-letter">Cover Letter</button>
+        </div>
+
+        <!-- Resume tab -->
+        <div class="tab-panel" id="tab-resume">
+          <div id="honesty-warnings" class="hidden"></div>
+
+          <!-- Sub-tabs to jump between resume sections -->
+          <div class="subtabs" id="resume-subtabs">
+            <button class="subtab active" data-subtab="overview">Title &amp; Summary</button>
+            <button class="subtab" data-subtab="skills">Skills</button>
+            <button class="subtab" data-subtab="experience">Experience</button>
+            <button class="subtab" data-subtab="projects">Projects</button>
+            <button class="subtab" data-subtab="extras">Certifications &amp; Recognition</button>
+          </div>
+
+          <div class="subtab-panel" id="sub-overview">
+            <div id="title-line-diff" class="diff-block"></div>
+            <div id="summary-diff" class="diff-block"></div>
+          </div>
+
+          <div class="subtab-panel hidden" id="sub-skills">
+            <div id="suggested-skills" class="hidden"></div>
+
+            <h3>Technical Skills <span class="hint">(includes any added to match the job description)</span></h3>
+            <div id="skills-diff" class="diff-columns"></div>
+
+            <h3>Soft Skills / Core Competencies <span class="hint">(JD soft skills are standardized and added here)</span></h3>
+            <div id="competencies-diff" class="diff-columns"></div>
+          </div>
+
+          <div class="subtab-panel hidden" id="sub-experience">
+            <h3>Experience <span class="hint">(bullets reworded for this role &amp; ATS; facts unchanged — edit if needed)</span></h3>
+            <div id="experience-diff"></div>
+          </div>
+
+          <div class="subtab-panel hidden" id="sub-projects">
+            <h3>Projects <span class="hint">(bullets reworded for this role &amp; ATS; facts unchanged — edit if needed)</span></h3>
+            <div id="projects-diff"></div>
+          </div>
+
+          <div class="subtab-panel hidden" id="sub-extras">
+            <h3>Certifications</h3>
+            <div id="certifications-list"></div>
+            <h3>Awards &amp; Recognition</h3>
+            <div id="awards-list"></div>
+          </div>
+
+          <div class="actions sticky-actions">
+            <button id="btn-download-resume">Download Resume PDF</button>
+            <span class="status" id="status-render"></span>
+          </div>
+        </div>
+
+        <!-- Cover letter tab -->
+        <div class="tab-panel hidden" id="tab-cover-letter">
+          <p class="hint" style="margin-top:0;">Generated from your tailored resume — every fact comes from your background. Edit freely; your changes are what gets downloaded.</p>
+          <div class="field" id="cl-subject-field">
+            <label for="cl-subject">Subject / Re: line</label>
+            <input type="text" id="cl-subject" placeholder="Re: Application for ..." />
+          </div>
+          <label for="cl-body" style="display:block;margin-top:0.75rem;">Cover letter body</label>
+          <textarea id="cl-body" class="cl-body" rows="16" placeholder="Your cover letter will appear here..."></textarea>
+          <div class="actions sticky-actions">
+            <button id="btn-regenerate-cover-letter" class="btn-secondary">Regenerate</button>
+            <button id="btn-copy-cover-letter" class="btn-secondary">Copy</button>
+            <button id="btn-download-cover-letter">Download Cover Letter PDF</button>
+            <span class="status" id="status-cover-letter"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card hidden empty-hint" id="step-placeholder">
+        <p>Paste a job description on the left and click <strong>Analyze</strong> to begin. Your tailored resume and cover letter will appear here.</p>
+      </section>
+
+      <section class="card hidden" id="step-error">
+        <h2>Error</h2>
+        <pre id="error-output"></pre>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: ask the user how to categorize JD keywords with no known category -->
+  <div class="modal-overlay hidden" id="categorize-modal">
+    <div class="modal">
+      <h2>Categorize New Keywords</h2>
+      <p>These keywords from the job description don't match any known skill category. Choose a category for each (or leave as "Additional" to use a catch-all section). Your choices are remembered for future jobs.</p>
+      <div id="categorize-list"></div>
       <div class="actions">
-        <button id="btn-analyze">Analyze</button>
-        <span class="status" id="status-analyze"></span>
+        <button id="btn-categorize-submit">Continue Tailoring</button>
+        <span class="status" id="status-categorize"></span>
       </div>
-    </section>
-
-    <!-- Step 2: Analysis results -->
-    <section class="card hidden" id="step-analysis">
-      <h2>2. Detected Keywords</h2>
-      <div id="analysis-output"></div>
-      <div class="actions">
-        <button id="btn-tailor">Tailor Resume</button>
-        <span class="status" id="status-tailor"></span>
-      </div>
-    </section>
-
-    <!-- Step 3: Tailoring diff + keyword approval -->
-    <section class="card hidden" id="step-tailor">
-      <h2>3. Review Tailored Resume</h2>
-
-      <div id="honesty-warnings" class="hidden"></div>
-
-      <div id="title-line-diff" class="diff-block"></div>
-
-      <div id="summary-diff" class="diff-block"></div>
-
-      <h3>Core Skills <span class="hint">(technical skills; includes any added to match the job description)</span></h3>
-      <div id="skills-diff"></div>
-
-      <h3>Core Competencies <span class="hint">(soft skills; JD soft skills are standardized and added here)</span></h3>
-      <div id="competencies-diff"></div>
-
-      <div class="actions">
-        <button id="btn-download-resume">Download Resume PDF</button>
-        <button id="btn-preview-cover-letter">Preview Cover Letter</button>
-        <span class="status" id="status-render"></span>
-      </div>
-    </section>
-
-    <!-- Step 4: Cover letter preview -->
-    <section class="card hidden" id="step-cover-letter">
-      <h2>4. Cover Letter</h2>
-      <div id="cover-letter-preview" class="cover-letter-preview"></div>
-      <div class="actions">
-        <button id="btn-copy-cover-letter">Copy to Clipboard</button>
-        <button id="btn-download-cover-letter">Download Cover Letter PDF</button>
-        <span class="status" id="status-cover-letter"></span>
-      </div>
-    </section>
-
-    <section class="card hidden" id="step-error">
-      <h2>Error</h2>
-      <pre id="error-output"></pre>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

@@ -45,7 +45,9 @@
 \vspace{0.5em}
 <% endif %>
 
-<% if role %>\textbf{Re: Application for <<role>><% if company %> at <<company>><% endif %>}
+<% if subject %>\textbf{<<subject>>}
+
+<% elif role %>\textbf{Re: Application for <<role>><% if company %> at <<company>><% endif %>}
 
 <% endif %>
 Dear Hiring Manager,
